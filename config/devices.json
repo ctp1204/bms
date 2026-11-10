@@ -1,0 +1,571 @@
+{
+  "site": {
+    "name": {
+      "vi": "Phòng máy A (giả lập)",
+      "ja": "サーバールーム A（シミュレーション）"
+    }
+  },
+  "modbus": {
+    "host": "127.0.0.1",
+    "port": 5020,
+    "timeoutMs": 800
+  },
+  "pollIntervalMs": 2000,
+  "historyHours": 6,
+  "devices": [
+    {
+      "id": "crah1",
+      "name": "CRAH-1",
+      "type": "crah",
+      "unit": 1,
+      "fc": 4,
+      "start": 0,
+      "count": 5,
+      "points": [
+        {
+          "key": "supply_temp",
+          "name": {
+            "vi": "Nhiệt độ gió cấp",
+            "ja": "給気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "return_temp",
+          "name": {
+            "vi": "Nhiệt độ gió hồi",
+            "ja": "還気温度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "fan_speed",
+          "name": {
+            "vi": "Tốc độ quạt",
+            "ja": "ファン速度"
+          },
+          "offset": 2,
+          "scale": 1,
+          "uom": "%"
+        },
+        {
+          "key": "status",
+          "name": {
+            "vi": "Trạng thái",
+            "ja": "運転状態"
+          },
+          "offset": 3,
+          "scale": 1,
+          "enum": {
+            "0": {
+              "vi": "Dừng",
+              "ja": "停止"
+            },
+            "1": {
+              "vi": "Đang chạy",
+              "ja": "運転中"
+            },
+            "2": {
+              "vi": "Lỗi",
+              "ja": "故障"
+            }
+          }
+        },
+        {
+          "key": "power_kw",
+          "name": {
+            "vi": "Công suất điện",
+            "ja": "消費電力"
+          },
+          "offset": 4,
+          "scale": 10,
+          "uom": "kW"
+        }
+      ]
+    },
+    {
+      "id": "crah2",
+      "name": "CRAH-2",
+      "type": "crah",
+      "unit": 2,
+      "fc": 4,
+      "start": 0,
+      "count": 5,
+      "points": [
+        {
+          "key": "supply_temp",
+          "name": {
+            "vi": "Nhiệt độ gió cấp",
+            "ja": "給気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "return_temp",
+          "name": {
+            "vi": "Nhiệt độ gió hồi",
+            "ja": "還気温度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "fan_speed",
+          "name": {
+            "vi": "Tốc độ quạt",
+            "ja": "ファン速度"
+          },
+          "offset": 2,
+          "scale": 1,
+          "uom": "%"
+        },
+        {
+          "key": "status",
+          "name": {
+            "vi": "Trạng thái",
+            "ja": "運転状態"
+          },
+          "offset": 3,
+          "scale": 1,
+          "enum": {
+            "0": {
+              "vi": "Dừng",
+              "ja": "停止"
+            },
+            "1": {
+              "vi": "Đang chạy",
+              "ja": "運転中"
+            },
+            "2": {
+              "vi": "Lỗi",
+              "ja": "故障"
+            }
+          }
+        },
+        {
+          "key": "power_kw",
+          "name": {
+            "vi": "Công suất điện",
+            "ja": "消費電力"
+          },
+          "offset": 4,
+          "scale": 10,
+          "uom": "kW"
+        }
+      ]
+    },
+    {
+      "id": "chiller1",
+      "name": "Chiller-1",
+      "type": "chiller",
+      "unit": 10,
+      "fc": 4,
+      "start": 0,
+      "count": 5,
+      "points": [
+        {
+          "key": "chw_supply",
+          "name": {
+            "vi": "Nước lạnh cấp",
+            "ja": "冷水往き温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "chw_return",
+          "name": {
+            "vi": "Nước lạnh hồi",
+            "ja": "冷水還り温度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "status",
+          "name": {
+            "vi": "Trạng thái",
+            "ja": "運転状態"
+          },
+          "offset": 2,
+          "scale": 1,
+          "enum": {
+            "0": {
+              "vi": "Dừng",
+              "ja": "停止"
+            },
+            "1": {
+              "vi": "Đang chạy",
+              "ja": "運転中"
+            },
+            "2": {
+              "vi": "Lỗi",
+              "ja": "故障"
+            }
+          }
+        },
+        {
+          "key": "power_kw",
+          "name": {
+            "vi": "Công suất điện",
+            "ja": "消費電力"
+          },
+          "offset": 3,
+          "scale": 10,
+          "uom": "kW"
+        },
+        {
+          "key": "load_pct",
+          "name": {
+            "vi": "Tải",
+            "ja": "負荷率"
+          },
+          "offset": 4,
+          "scale": 1,
+          "uom": "%"
+        }
+      ]
+    },
+    {
+      "id": "rack1",
+      "name": {
+        "vi": "Rack R1",
+        "ja": "ラック R1"
+      },
+      "type": "rack_sensor",
+      "position": 1,
+      "unit": 21,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "temp",
+          "name": {
+            "vi": "Nhiệt độ inlet",
+            "ja": "吸気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "humidity",
+          "name": {
+            "vi": "Độ ẩm",
+            "ja": "湿度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "%RH"
+        }
+      ]
+    },
+    {
+      "id": "rack2",
+      "name": {
+        "vi": "Rack R2",
+        "ja": "ラック R2"
+      },
+      "type": "rack_sensor",
+      "position": 2,
+      "unit": 22,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "temp",
+          "name": {
+            "vi": "Nhiệt độ inlet",
+            "ja": "吸気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "humidity",
+          "name": {
+            "vi": "Độ ẩm",
+            "ja": "湿度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "%RH"
+        }
+      ]
+    },
+    {
+      "id": "rack3",
+      "name": {
+        "vi": "Rack R3",
+        "ja": "ラック R3"
+      },
+      "type": "rack_sensor",
+      "position": 3,
+      "unit": 23,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "temp",
+          "name": {
+            "vi": "Nhiệt độ inlet",
+            "ja": "吸気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "humidity",
+          "name": {
+            "vi": "Độ ẩm",
+            "ja": "湿度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "%RH"
+        }
+      ]
+    },
+    {
+      "id": "rack4",
+      "name": {
+        "vi": "Rack R4",
+        "ja": "ラック R4"
+      },
+      "type": "rack_sensor",
+      "position": 4,
+      "unit": 24,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "temp",
+          "name": {
+            "vi": "Nhiệt độ inlet",
+            "ja": "吸気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "humidity",
+          "name": {
+            "vi": "Độ ẩm",
+            "ja": "湿度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "%RH"
+        }
+      ]
+    },
+    {
+      "id": "rack5",
+      "name": {
+        "vi": "Rack R5",
+        "ja": "ラック R5"
+      },
+      "type": "rack_sensor",
+      "position": 5,
+      "unit": 25,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "temp",
+          "name": {
+            "vi": "Nhiệt độ inlet",
+            "ja": "吸気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "humidity",
+          "name": {
+            "vi": "Độ ẩm",
+            "ja": "湿度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "%RH"
+        }
+      ]
+    },
+    {
+      "id": "rack6",
+      "name": {
+        "vi": "Rack R6",
+        "ja": "ラック R6"
+      },
+      "type": "rack_sensor",
+      "position": 6,
+      "unit": 26,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "temp",
+          "name": {
+            "vi": "Nhiệt độ inlet",
+            "ja": "吸気温度"
+          },
+          "offset": 0,
+          "scale": 10,
+          "signed": true,
+          "uom": "°C"
+        },
+        {
+          "key": "humidity",
+          "name": {
+            "vi": "Độ ẩm",
+            "ja": "湿度"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "%RH"
+        }
+      ]
+    },
+    {
+      "id": "leak1",
+      "name": {
+        "vi": "Dây cảm biến rò rỉ",
+        "ja": "漏水検知ケーブル"
+      },
+      "type": "leak",
+      "unit": 30,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "detected",
+          "name": {
+            "vi": "Rò rỉ nước",
+            "ja": "漏水"
+          },
+          "offset": 0,
+          "scale": 1,
+          "enum": {
+            "0": {
+              "vi": "Bình thường",
+              "ja": "正常"
+            },
+            "1": {
+              "vi": "Phát hiện rò rỉ",
+              "ja": "漏水検知"
+            }
+          }
+        },
+        {
+          "key": "zone",
+          "name": {
+            "vi": "Vùng rò rỉ",
+            "ja": "漏水ゾーン"
+          },
+          "offset": 1,
+          "scale": 1
+        }
+      ]
+    },
+    {
+      "id": "pm1",
+      "name": {
+        "vi": "Đồng hồ điện tổng",
+        "ja": "メイン電力計"
+      },
+      "type": "power_meter",
+      "unit": 40,
+      "fc": 4,
+      "start": 0,
+      "count": 2,
+      "points": [
+        {
+          "key": "it_kw",
+          "name": {
+            "vi": "Tải IT",
+            "ja": "IT負荷"
+          },
+          "offset": 0,
+          "scale": 10,
+          "uom": "kW"
+        },
+        {
+          "key": "facility_kw",
+          "name": {
+            "vi": "Tổng điện cơ sở",
+            "ja": "施設総電力"
+          },
+          "offset": 1,
+          "scale": 10,
+          "uom": "kW"
+        }
+      ]
+    }
+  ],
+  "derived": [
+    {
+      "id": "site.pue",
+      "name": {
+        "vi": "PUE",
+        "ja": "PUE"
+      },
+      "uom": ""
+    },
+    {
+      "id": "site.cooling_kw",
+      "name": {
+        "vi": "Điện cho làm mát",
+        "ja": "冷却電力"
+      },
+      "uom": "kW"
+    },
+    {
+      "id": "site.inlet_avg",
+      "name": {
+        "vi": "Nhiệt độ inlet trung bình",
+        "ja": "平均吸気温度"
+      },
+      "uom": "°C"
+    },
+    {
+      "id": "site.inlet_max",
+      "name": {
+        "vi": "Nhiệt độ inlet cao nhất",
+        "ja": "最高吸気温度"
+      },
+      "uom": "°C"
+    }
+  ]
+}

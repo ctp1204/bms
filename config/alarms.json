@@ -1,0 +1,12 @@
+[
+  {"id": "rack_hot_warn", "point": "rack*.temp", "op": ">", "value": 27, "deadband": 0.5, "delaySec": 10, "severity": "warning", "suppressedBy": "rack_hot_crit", "message": {"vi": "{device}: nhiệt độ inlet {value}°C vượt 27°C (ngưỡng khuyến nghị ASHRAE)", "ja": "{device}: 吸気温度 {value}°C が 27°C を超過（ASHRAE 推奨上限）"}},
+  {"id": "rack_hot_crit", "point": "rack*.temp", "op": ">", "value": 32, "deadband": 0.5, "delaySec": 5, "severity": "critical", "message": {"vi": "{device}: nhiệt độ inlet {value}°C vượt 32°C (giới hạn cho phép ASHRAE A1)", "ja": "{device}: 吸気温度 {value}°C が 32°C を超過（ASHRAE A1 許容上限）"}},
+  {"id": "rack_humid_high", "point": "rack*.humidity", "op": ">", "value": 70, "deadband": 2, "delaySec": 30, "severity": "warning", "message": {"vi": "{device}: độ ẩm {value}%RH quá cao", "ja": "{device}: 湿度 {value}%RH が高すぎます"}},
+  {"id": "rack_humid_low", "point": "rack*.humidity", "op": "<", "value": 20, "deadband": 2, "delaySec": 30, "severity": "warning", "message": {"vi": "{device}: độ ẩm {value}%RH quá thấp, nguy cơ tĩnh điện", "ja": "{device}: 湿度 {value}%RH が低すぎます（静電気のおそれ）"}},
+  {"id": "crah_fault", "point": "crah*.status", "op": "==", "value": 2, "delaySec": 0, "severity": "critical", "message": {"vi": "{device}: thiết bị báo lỗi", "ja": "{device}: 機器故障"}},
+  {"id": "chiller_fault", "point": "chiller1.status", "op": "==", "value": 2, "delaySec": 0, "severity": "critical", "message": {"vi": "{device}: thiết bị báo lỗi", "ja": "{device}: 機器故障"}},
+  {"id": "chw_high", "point": "chiller1.chw_supply", "op": ">", "value": 12, "deadband": 0.5, "delaySec": 10, "severity": "warning", "message": {"vi": "{device}: nước lạnh cấp {value}°C cao hơn 12°C", "ja": "{device}: 冷水往き温度 {value}°C が 12°C を超過"}},
+  {"id": "leak", "point": "leak1.detected", "op": "==", "value": 1, "delaySec": 0, "severity": "critical", "message": {"vi": "Phát hiện rò rỉ nước dưới sàn nâng", "ja": "二重床下で漏水を検知"}},
+  {"id": "pue_high", "point": "site.pue", "op": ">", "value": 1.6, "deadband": 0.05, "delaySec": 30, "severity": "info", "message": {"vi": "PUE {value} cao hơn mục tiêu 1,6", "ja": "PUE {value} が目標値 1.6 を上回っています"}},
+  {"id": "comm_loss", "type": "comm", "delaySec": 6, "severity": "warning", "message": {"vi": "{device}: mất kết nối Modbus", "ja": "{device}: Modbus 通信断"}}
+]

@@ -1,0 +1,14 @@
+{
+  "name": "bms-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BMS demo (read-only monitoring layer) with a simulated data center plant over Modbus TCP",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node scripts/start.js",
+    "sim": "node sim/index.js",
+    "bms": "node src/index.js",
+    "test": "node --test test/",
+    "check": "for f in src/*.js sim/*.js scripts/*.js public/*.js; do node --check \"$f\" || exit 1; done && echo 'syntax OK'"
+  }
+}
