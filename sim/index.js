@@ -6,7 +6,8 @@ const http = require('http');
 const { createServer, ModbusException, EXCEPTION } = require('../src/modbus');
 const { Plant, FAULTS } = require('./plant');
 
-const HOST = process.env.HOST || '127.0.0.1';
+// Dùng SIM_HOST (không dùng HOST) để khi BMS mở ra internet (HOST=0.0.0.0), bộ giả lập vẫn chỉ nằm nội bộ
+const HOST = process.env.SIM_HOST || '127.0.0.1';
 const MODBUS_PORT = Number(process.env.SIM_MODBUS_PORT || 5020);
 const CONTROL_PORT = Number(process.env.SIM_CONTROL_PORT || 5021);
 const SPEED = Number(process.env.SIM_SPEED || 1);

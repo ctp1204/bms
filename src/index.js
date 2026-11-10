@@ -9,6 +9,7 @@ const { Collector } = require('./collector');
 const { AlarmEngine } = require('./alarms');
 const { History } = require('./history');
 const { LANGS } = require('./locale');
+const { checkBasicAuth } = require('./auth');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -16,6 +17,12 @@ const DATA = path.join(ROOT, 'data');
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 8080);
 const SIM_CONTROL_PORT = Number(process.env.SIM_CONTROL_PORT || 5021);
+// SIM_PROXY=1: chế độ deploy một cổng. BMS chuyển tiếp /sim/api/faults sang API sự cố của bộ giả lập
+// để bảng "Giả lập sự cố" dùng được qua cùng domain. Chỉ dành cho demo; BMS vẫn không ghi gì xuống thiết bị.
+const SIM_PROXY = process.env.SIM_PROXY === '1';
+const SIM_HOST = process.env.SIM_HOST || '127.0.0.1';
+const AUTH_USER = process.env.BASIC_AUTH_USER || 'demo';
+const AUTH_PASSWORD = process.env.BASIC_AUTH_PASSWORD || '';
 
 const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/devices.json'), 'utf8'));
 const rules = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/alarms.json'), 'utf8'));
@@ -85,10 +92,30 @@ function serveStatic(res, urlPath) {
   return undefined;
 }
 
+function proxyToSim(req, res) {
+  const upstream = http.request(
+    { host: SIM_HOST, port: SIM_CONTROL_PORT, path: '/api/faults', method: req.method, headers: { 'Content-Type': 'application/json' }, timeout: 3000 },
+    up => {
+      res.writeHead(up.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      up.pipe(res);
+    }
+  );
+  upstream.on('timeout', () => upstream.destroy(new Error('Simulator timeout')));
+  upstream.on('error', () => { if (!res.headersSent) json(res, 502, { error: 'Simulator unreachable' }); });
+  if (req.method === 'POST') req.pipe(upstream);
+  else upstream.end();
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
+  if (p === '/healthz') return json(res, 200, { ok: true, polling: Boolean(last) });
+  if (AUTH_PASSWORD && !checkBasicAuth(req.headers.authorization, AUTH_USER, AUTH_PASSWORD)) {
+    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="BMS Demo", charset="UTF-8"', 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Authentication required');
+  }
   try {
+    if (SIM_PROXY && p === '/sim/api/faults' && (req.method === 'GET' || req.method === 'POST')) return proxyToSim(req, res);
     if (req.method === 'GET' && p === '/api/config') {
       return json(res, 200, {
         langs: LANGS,
@@ -98,6 +125,7 @@ const server = http.createServer(async (req, res) => {
         derived: cfg.derived,
         rules: rules.map(({ id, point, op, value, severity, type }) => ({ id, point, op, value, severity, type })),
         simControlPort: SIM_CONTROL_PORT,
+        simControlPath: SIM_PROXY ? '/sim' : null,
       });
     }
     if (req.method === 'GET' && p === '/api/snapshot') return json(res, 200, last || {});
@@ -147,5 +175,7 @@ server.on('error', err => {
 server.listen(PORT, HOST, () => {
   console.log(`[bms] Dashboard on http://${HOST}:${PORT}`);
   console.log(`[bms] Polling Modbus ${cfg.modbus.host}:${cfg.modbus.port} every ${cfg.pollIntervalMs} ms (read-only)`);
+  if (SIM_PROXY) console.log(`[bms] Demo mode: /sim/api/faults -> simulator ${SIM_HOST}:${SIM_CONTROL_PORT}`);
+  console.log(`[bms] Basic auth: ${AUTH_PASSWORD ? `on (user "${AUTH_USER}")` : 'off'}`);
   collector.start();
 });

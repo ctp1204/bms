@@ -1,0 +1,21 @@
+# Render Blueprint: một web service miễn phí chạy cả bộ giả lập và BMS (npm start).
+# Chỉ cổng web của BMS mở ra internet; Modbus (5020) và API sự cố (5021) nằm nội bộ trong container.
+services:
+  - type: web
+    name: bms-demo
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: HOST
+        value: 0.0.0.0
+      - key: SIM_PROXY
+        value: "1"
+      - key: BASIC_AUTH_USER
+        value: demo
+      - key: BASIC_AUTH_PASSWORD
+        sync: false # Render hỏi giá trị khi tạo Blueprint; không lưu mật khẩu trong repo

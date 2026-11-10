@@ -322,7 +322,8 @@ async function init() {
   S.lang = pickLang();
   applyStatic();
   S.cfg = await (await fetch('/api/config')).json();
-  S.simUrl = `${location.protocol}//${location.hostname}:${S.cfg.simControlPort}`;
+  // Deploy một cổng (SIM_PROXY=1): gọi bộ giả lập qua /sim trên cùng domain; chạy local: gọi thẳng cổng 5021
+  S.simUrl = S.cfg.simControlPath || `${location.protocol}//${location.hostname}:${S.cfg.simControlPort}`;
   for (const d of S.cfg.devices) for (const p of d.points) S.meta[`${d.id}.${p.key}`] = { name: p.name, uom: p.uom || '', enum: p.enum };
   for (const p of S.cfg.derived) S.meta[p.id] = { name: p.name, uom: p.uom };
   applyStatic();
