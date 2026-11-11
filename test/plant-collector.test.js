@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { Plant } = require('../sim/plant');
+const { Plant, SRC, GEN, UPS } = require('../sim/plant');
 const { Collector, decodeDevice, derive } = require('../src/collector');
 const { History } = require('../src/history');
 const { createServer, ModbusTcpClient, ModbusException, EXCEPTION } = require('../src/modbus');
@@ -69,10 +69,74 @@ test('decodeDevice applies scale and sign; derive computes PUE and inlet stats',
     'crah1.power_kw': 3.2,
   });
   const d = derive(cfg.devices, {
-    'pm1.it_kw': 100, 'pm1.facility_kw': 140, 'rack1.temp': 24, 'rack2.temp': 26,
+    'ups1.out_kw': 100, 'msb1.kw': 140, 'rack1.temp': 24, 'rack2.temp': 26,
     'crah1.power_kw': 3, 'chiller1.power_kw': 20,
   });
-  assert.deepEqual(d, { 'site.pue': 1.4, 'site.cooling_kw': 23, 'site.inlet_avg': 25, 'site.inlet_max': 26 });
+  assert.deepEqual(d, { 'site.it_kw': 100, 'site.pue': 1.4, 'site.cooling_kw': 23, 'site.inlet_avg': 25, 'site.inlet_max': 26 });
+  // Mất nguồn: tổng điện MSB = 0 thì không tính PUE
+  assert.equal(derive(cfg.devices, { 'ups1.out_kw': 100, 'msb1.kw': 0 })['site.pue'], undefined);
+});
+
+test('decodeDevice reads 32-bit kWh from two registers (high word first)', () => {
+  const msb = cfg.devices.find(d => d.id === 'msb1');
+  const kwh = 1250123;
+  const v = decodeDevice(msb, [400, 200, 1300, 95, 5000, 25, kwh >>> 16, kwh & 0xffff]);
+  assert.equal(v['msb1.kwh'], kwh);
+  assert.equal(v['msb1.pf'], 0.95);
+  assert.equal(v['msb1.freq'], 50);
+});
+
+test('utility outage: UPS on battery, cooling stops, generator takes over, then retransfer', () => {
+  const p = new Plant({ random: seeded(6) });
+  run(p, 60);
+  p.setFault('utility_outage', true);
+  run(p, 2);
+  assert.equal(p.power.ats.source, SRC.NONE, 'gap before generator is up');
+  assert.equal(p.power.ups.mode, UPS.BATTERY);
+  assert.ok(p.itKw > 100, 'IT stays up on battery');
+  assert.equal(p.crah[0].status, 0, 'CRAH not on UPS: stops');
+  assert.equal(p.facilityKw, 0);
+  run(p, 12);
+  assert.equal(p.power.gen.status, GEN.RUNNING);
+  assert.equal(p.power.ats.source, SRC.GEN);
+  assert.equal(p.power.ups.mode, UPS.ONLINE);
+  assert.equal(p.crah[0].status, 1);
+  assert.equal(p.chiller.status, 0, 'chiller waits to restart');
+  run(p, 40);
+  assert.equal(p.chiller.status, 1);
+  p.setFault('utility_outage', false);
+  run(p, 10);
+  assert.equal(p.power.ats.source, SRC.GEN, 'waits for utility to be stable');
+  run(p, 10);
+  assert.equal(p.power.ats.source, SRC.UTIL);
+  assert.equal(p.power.ats.transfers, 2);
+  run(p, 40);
+  assert.equal(p.power.gen.status, GEN.STANDBY, 'generator cools down then stops');
+});
+
+test('generator fails to start: battery drains and IT load is lost', () => {
+  const p = new Plant({ random: seeded(7) });
+  run(p, 30);
+  p.setFault('gen_fail_start', true);
+  p.setFault('utility_outage', true);
+  run(p, 5);
+  assert.equal(p.power.gen.status, GEN.FAULT);
+  assert.equal(p.power.ats.source, SRC.NONE);
+  run(p, 1500);
+  assert.equal(p.power.ups.battery, 0);
+  assert.equal(p.itKw, 0);
+});
+
+test('PDU-A input lost: PDU-B carries every rack', () => {
+  const p = new Plant({ random: seeded(8) });
+  run(p, 30);
+  const [a0, b0] = p.power.pdu.map(d => d.total);
+  assert.ok(Math.abs(a0 - b0) < 0.01, 'normally split 50/50');
+  p.setFault('pdu_a_fail', true);
+  run(p, 1);
+  assert.equal(p.power.pdu[0].status, 1);
+  assert.equal(p.power.pdu[0].total, 0);
+  assert.ok(Math.abs(p.power.pdu[1].total - p.itKw) < 0.01);
 });
 
 test('collector reads the simulated plant end-to-end and marks offline devices', async () => {

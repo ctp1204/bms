@@ -1,11 +1,12 @@
 'use strict';
 /* global document, window, fetch, EventSource, location, getComputedStyle, localStorage, navigator, I18N */
 
-const S = { cfg: null, meta: {}, snap: null, tab: 'active', simUrl: '', lastAlarmSig: '', lang: 'vi' };
+const S = { cfg: null, meta: {}, devDomain: {}, snap: null, tab: 'active', view: 'overview', simUrl: '', sigs: {}, lang: 'vi' };
 const $ = sel => document.querySelector(sel);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const val = id => (S.snap ? S.snap.values[id] : undefined);
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const VIEWS = ['overview', 'cooling', 'power'];
 
 /* ---------- Ngôn ngữ ---------- */
 const LANGS = Object.keys(I18N);
@@ -43,7 +44,7 @@ function applyStatic() {
     .map(m => `<option value="${m}">${m < 60 ? t('trend.min', { n: m }) : t('trend.hour', { n: m / 60 })}</option>`)
     .join('');
   range.value = cur;
-  if (S.cfg) $('#site-name').textContent = `BMS Demo · ${L(S.cfg.site.name)}`;
+  if (S.cfg) $('#site-name').textContent = `BMS · EPMS Demo · ${L(S.cfg.site.name)}`;
 }
 
 function setLang(lang) {
@@ -55,12 +56,21 @@ function setLang(lang) {
   window.history.replaceState(null, '', url);
   applyStatic();
   buildFloor();
+  buildOneLine();
   buildTrendSelect();
-  S.lastAlarmSig = '';
+  S.sigs = {};
   render();
   loadTrend();
   loadFaults();
   if (S.tab === 'log') loadEvents();
+}
+
+/* ---------- Tab màn hình (Tổng quan | Làm mát | Điện) ---------- */
+function showView(view) {
+  S.view = VIEWS.includes(view) ? view : 'overview';
+  document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === S.view)));
+  document.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== S.view; });
+  if (S.view === 'overview') loadTrend();
 }
 
 /* ---------- Định dạng giá trị ---------- */
@@ -77,11 +87,12 @@ function fmtPoint(id) {
   const v = val(id);
   if (v === undefined) return '—';
   if (m.enum) return L(m.enum[String(v)]) || String(v);
-  const decimals = id === 'site.pue' ? 2 : m.uom && m.uom !== '%' ? 1 : 0;
+  const decimals = m.decimals ?? (m.uom && m.uom !== '%' ? 1 : 0);
   return `${num(v, decimals)}${m.uom ? ` ${m.uom}` : ''}`;
 }
 
 const alarmText = a => (a.messages && a.messages[S.lang]) || a.message;
+const alarmDomain = a => S.devDomain[a.deviceId] || (S.meta[a.point] || {}).domain || 'cooling';
 
 /* ---------- KPI ---------- */
 function renderKpis() {
@@ -90,16 +101,22 @@ function renderKpis() {
   const active = alarms.filter(a => !a.clearedAt).length;
   const inletMax = val('site.inlet_max');
   const pue = val('site.pue');
+  const src = val('ats1.source');
+  const upsMode = val('ups1.mode');
+  const battery = val('ups1.battery_pct');
   const items = [
     { k: 'PUE', v: num(pue, 2), h: t('kpi.pueHint'), cls: pue > 1.6 ? 'warn' : '' },
-    { k: t('kpi.it'), v: num(val('pm1.it_kw')), u: 'kW', h: t('kpi.itHint') },
-    { k: t('kpi.cooling'), v: num(val('site.cooling_kw')), u: 'kW', h: t('kpi.coolingHint') },
+    { k: t('kpi.it'), v: num(val('site.it_kw')), u: 'kW', h: t('kpi.itHint') },
+    { k: t('kpi.source'), v: esc(fmtPoint('ats1.source')), h: t('kpi.sourceHint', { mode: fmtPoint('ups1.mode') }),
+      cls: src === 2 || upsMode === 1 ? 'crit' : src === 1 || upsMode === 2 ? 'warn' : '', text: true },
+    { k: t('kpi.ups'), v: num(battery, 0), u: '%', h: t('kpi.upsHint', { n: num(Math.min(val('ups1.runtime_min') ?? 0, 999), 0) }),
+      cls: battery < 30 ? 'crit' : battery < 90 ? 'warn' : '' },
     { k: t('kpi.inlet'), v: num(inletMax), u: '°C', h: t('kpi.inletHint', { v: num(val('site.inlet_avg')) }),
       cls: inletMax > 32 ? 'crit' : inletMax > 27 ? 'warn' : '' },
     { k: t('kpi.alarms'), v: String(active), h: t('kpi.alarmsHint', { n: activeCrit }), cls: activeCrit ? 'crit' : active ? 'warn' : '' },
   ];
   $('#kpis').innerHTML = items
-    .map(i => `<div class="kpi ${i.cls || ''}"><div class="k">${esc(i.k)}</div><div class="v">${i.v}${i.u ? `<small>${i.u}</small>` : ''}</div><div class="h">${esc(i.h)}</div></div>`)
+    .map(i => `<div class="kpi ${i.cls || ''}"><div class="k">${esc(i.k)}</div><div class="v${i.text ? ' v-text' : ''}">${i.v}${i.u ? `<small>${i.u}</small>` : ''}</div><div class="h">${esc(i.h)}</div></div>`)
     .join('');
 }
 
@@ -165,30 +182,144 @@ function renderFloor() {
   }
 }
 
+/* ---------- Sơ đồ một sợi (SVG) ---------- */
+const OL_BOXES = {
+  util: { x: 20, y: 30, w: 140, h: 64 },
+  gen: { x: 20, y: 186, w: 140, h: 86 },
+  ats: { x: 210, y: 110, w: 110, h: 64 },
+  msb: { x: 370, y: 98, w: 160, h: 88 },
+  ups: { x: 590, y: 14, w: 170, h: 112 },
+  mech: { x: 590, y: 190, w: 170, h: 74 },
+  pdua: { x: 810, y: 14, w: 170, h: 52 },
+  pdub: { x: 810, y: 76, w: 170, h: 52 },
+  it: { x: 810, y: 160, w: 170, h: 52 },
+};
+const OL_WIRES = {
+  'w-util': 'M160 62 C185 62 185 130 210 130',
+  'w-gen': 'M160 229 C185 229 185 156 210 156',
+  'w-ats': 'M320 142 L370 142',
+  'w-ups': 'M530 125 C560 125 560 70 590 70',
+  'w-mech': 'M530 160 C560 160 560 227 590 227',
+  'w-pdua': 'M760 52 L810 40',
+  'w-pdub': 'M760 92 L810 102',
+  'w-it': 'M895 128 L895 160',
+};
+function buildOneLine() {
+  const title = { util: t('ol.utility'), gen: t('ol.gen'), ats: 'ATS-1', msb: t('ol.msb'), ups: 'UPS-1', mech: t('ol.mech'), pdua: 'PDU-A', pdub: 'PDU-B', it: t('ol.it') };
+  const lines = { util: 1, gen: 3, ats: 1, msb: 3, ups: 4, mech: 2, pdua: 1, pdub: 1, it: 1 };
+  let svg = Object.entries(OL_WIRES).map(([id, d]) => `<path id="${id}" class="wire" d="${d}"/>`).join('');
+  for (const [id, b] of Object.entries(OL_BOXES)) {
+    svg += `<g id="ob-${id}" class="obox"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="7"/>
+      <text class="ot" x="${b.x + 10}" y="${b.y + 20}">${esc(title[id])}</text>`;
+    for (let i = 0; i < lines[id]; i++) svg += `<text id="ol-${id}-${i}" class="ov" x="${b.x + 10}" y="${b.y + 40 + i * 18}"></text>`;
+    svg += '</g>';
+  }
+  $('#oneline').innerHTML = svg;
+}
+function renderOneLine() {
+  const devs = S.snap.devices || {};
+  const on = id => devs[id] && devs[id].status === 'online';
+  const setBox = (id, cls) => $(`#ob-${id}`).setAttribute('class', `obox ${cls}`);
+  const setTxt = (id, i, s) => { $(`#ol-${id}-${i}`).textContent = s; };
+  const setWire = (id, live) => $(`#${id}`).setAttribute('class', `wire${live ? ' live' : ''}`);
+  const src = val('ats1.source');
+  const utilOk = val('ats1.utility_ok') === 1;
+  const genSt = val('gen1.status');
+  const live = src === 0 || src === 1;
+  const upsOut = val('ups1.out_kw') > 0;
+  const upsMode = val('ups1.mode');
+
+  setBox('util', !on('ats1') ? 'off' : utilOk ? 'ok' : 'crit');
+  setTxt('util', 0, fmtPoint('ats1.utility_ok'));
+  setBox('gen', !on('gen1') ? 'off' : genSt === 2 ? 'ok' : genSt === 1 ? 'warn' : genSt === 3 ? 'crit' : '');
+  setTxt('gen', 0, fmtPoint('gen1.status'));
+  setTxt('gen', 1, fmtPoint('gen1.kw'));
+  setTxt('gen', 2, t('ol.fuel', { v: fmtPoint('gen1.fuel_pct') }));
+  setBox('ats', !on('ats1') ? 'off' : src === 0 ? 'ok' : src === 1 ? 'warn' : 'crit');
+  setTxt('ats', 0, fmtPoint('ats1.source'));
+  setBox('msb', !on('msb1') ? 'off' : !live ? 'crit' : val('msb1.thd_v') > 8 ? 'warn' : 'ok');
+  setTxt('msb', 0, fmtPoint('msb1.kw'));
+  setTxt('msb', 1, `${fmtPoint('msb1.voltage')} · ${fmtPoint('msb1.freq')}`);
+  setTxt('msb', 2, `THD ${fmtPoint('msb1.thd_v')}`);
+  setBox('ups', !on('ups1') ? 'off' : upsMode === 0 ? 'ok' : upsMode === 1 ? 'crit' : 'warn');
+  setTxt('ups', 0, fmtPoint('ups1.mode'));
+  setTxt('ups', 1, t('ol.load', { v: `${fmtPoint('ups1.out_kw')} · ${fmtPoint('ups1.load_pct')}` }));
+  setTxt('ups', 2, t('ol.battery', { v: fmtPoint('ups1.battery_pct') }));
+  setTxt('ups', 3, t('ol.runtime', { v: val('ups1.runtime_min') >= 999 ? '—' : fmtPoint('ups1.runtime_min') }));
+  setBox('mech', live ? 'ok' : 'crit');
+  setTxt('mech', 0, t('ol.mechSub'));
+  setTxt('mech', 1, fmtPoint('site.cooling_kw'));
+  setBox('pdua', !on('pdua') ? 'off' : val('pdua.status') === 1 ? 'crit' : 'ok');
+  setTxt('pdua', 0, fmtPoint('pdua.total_kw'));
+  setBox('pdub', !on('pdub') ? 'off' : val('pdub.status') === 1 ? 'crit' : 'ok');
+  setTxt('pdub', 0, fmtPoint('pdub.total_kw'));
+  setBox('it', upsOut ? 'ok' : 'crit');
+  setTxt('it', 0, fmtPoint('site.it_kw'));
+
+  setWire('w-util', utilOk && src === 0);
+  setWire('w-gen', genSt === 2 && src === 1);
+  setWire('w-ats', live);
+  setWire('w-ups', live);
+  setWire('w-mech', live);
+  setWire('w-pdua', upsOut && val('pdua.status') === 0);
+  setWire('w-pdub', upsOut && val('pdub.status') === 0);
+  setWire('w-it', upsOut);
+}
+
+/* ---------- Bảng tải PDU theo rack ---------- */
+function renderPdu() {
+  const racks = S.cfg.devices.filter(d => d.type === 'rack_sensor').sort((a, b) => a.position - b.position);
+  const rows = racks.map(r => {
+    const a = val(`pdua.r${r.position}_kw`);
+    const b = val(`pdub.r${r.position}_kw`);
+    const sum = typeof a === 'number' && typeof b === 'number' ? a + b : undefined;
+    return `<tr><td><b>${esc(L(r.name))}</b></td><td>${num(a)}</td><td>${num(b)}</td><td><b>${num(sum)}</b></td></tr>`;
+  }).join('');
+  $('#pdu-table').innerHTML = `<thead><tr><th>${esc(t('pdu.rack'))}</th><th>PDU-A (kW)</th><th>PDU-B (kW)</th><th>${esc(t('pdu.total'))}</th></tr></thead>
+    <tbody>${rows}<tr class="sum"><td><b>${esc(t('pdu.total'))}</b></td><td>${num(val('pdua.total_kw'))}</td><td>${num(val('pdub.total_kw'))}</td><td><b>${num(val('site.it_kw'))}</b></td></tr></tbody>`;
+}
+
 /* ---------- Cảnh báo ---------- */
+function alarmHtml(list, emptyKey) {
+  if (!list.length) return `<div class="empty">${esc(t(emptyKey))}</div>`;
+  return list
+    .map(a => {
+      const state = a.clearedAt ? t('alarms.clearedAt', { t: time(a.clearedAt) }) : t('alarms.active');
+      const ack = a.ackedAt ? t('alarms.ackedBy', { u: a.ackedBy }) : '';
+      return `<div class="alarm ${a.clearedAt ? 'cleared' : 'active'} ${a.ackedAt ? 'acked' : 'unacked'}">
+        <span class="sev ${a.severity}">${esc(t(`sev.${a.severity}`))}</span>
+        <div><div class="msg">${esc(alarmText(a))}</div><div class="meta">${time(a.raisedAt)} · ${esc(state)}${ack ? ` · ${esc(ack)}` : ''}</div></div>
+        ${a.ackedAt ? '' : `<button class="btn" data-ack="${a.id}">${esc(t('alarms.ack'))}</button>`}
+      </div>`;
+    })
+    .join('');
+}
+// Chỉ vẽ lại khi danh sách thay đổi, để nút Xác nhận không bị thay giữa chừng
+function renderAlarmBox(el, list, emptyKey) {
+  const sig = JSON.stringify(list.map(a => [a.id, a.clearedAt, a.ackedAt, a.value]));
+  if (S.sigs[el.id] === sig) return;
+  S.sigs[el.id] = sig;
+  el.innerHTML = alarmHtml(list, emptyKey);
+}
 function renderAlarms() {
   const list = S.snap.alarms || [];
-  const active = list.filter(a => !a.clearedAt).length;
+  const activeOf = arr => arr.filter(a => !a.clearedAt).length;
   const cnt = $('#alarm-count');
   cnt.textContent = String(list.length);
-  cnt.className = `count${active ? ' hot' : ''}`;
-  const sig = JSON.stringify(list.map(a => [a.id, a.clearedAt, a.ackedAt, a.value]));
-  if (sig === S.lastAlarmSig) return;
-  S.lastAlarmSig = sig;
-  $('#alarms').innerHTML = list.length
-    ? list
-        .map(a => {
-          const state = a.clearedAt ? t('alarms.clearedAt', { t: time(a.clearedAt) }) : t('alarms.active');
-          const ack = a.ackedAt ? t('alarms.ackedBy', { u: a.ackedBy }) : '';
-          return `<div class="alarm ${a.clearedAt ? 'cleared' : 'active'} ${a.ackedAt ? 'acked' : 'unacked'}">
-            <span class="sev ${a.severity}">${esc(t(`sev.${a.severity}`))}</span>
-            <div><div class="msg">${esc(alarmText(a))}</div><div class="meta">${time(a.raisedAt)} · ${esc(state)}${ack ? ` · ${esc(ack)}` : ''}</div></div>
-            ${a.ackedAt ? '' : `<button class="btn" data-ack="${a.id}">${esc(t('alarms.ack'))}</button>`}
-          </div>`;
-        })
-        .join('')
-    : `<div class="empty">${esc(t('alarms.empty'))}</div>`;
-  if (S.tab === 'log') loadEvents();
+  cnt.className = `count${activeOf(list) ? ' hot' : ''}`;
+  const byDomain = { cooling: [], power: [] };
+  for (const a of list) (byDomain[alarmDomain(a)] || byDomain.cooling).push(a);
+  // Huy hiệu số cảnh báo đang xảy ra trên từng tab
+  const badge = { all: activeOf(list), cooling: activeOf(byDomain.cooling), power: activeOf(byDomain.power) };
+  document.querySelectorAll('[data-badge]').forEach(b => {
+    const n = badge[b.dataset.badge];
+    b.textContent = n ? String(n) : '';
+    b.className = `count${n ? ' hot' : ' zero'}`;
+  });
+  renderAlarmBox($('#alarms'), list, 'alarms.empty');
+  renderAlarmBox($('#alarms-cooling'), byDomain.cooling, 'alarms.emptyDomain');
+  renderAlarmBox($('#alarms-power'), byDomain.power, 'alarms.emptyDomain');
+  if (S.tab === 'log' && S.sigs.log !== S.sigs.alarms) { S.sigs.log = S.sigs.alarms; loadEvents(); }
 }
 
 async function loadEvents() {
@@ -198,10 +329,11 @@ async function loadEvents() {
     : `<div class="empty">${esc(t('events.empty'))}</div>`;
 }
 
-/* ---------- Bảng thiết bị ---------- */
-function renderDevices() {
+/* ---------- Bảng thiết bị theo miền ---------- */
+function renderDevices(tableId, domain) {
   const devs = S.snap.devices || {};
   const rows = S.cfg.devices
+    .filter(d => d.domain === domain)
     .map(d => {
       const st = devs[d.id] || { status: 'unknown' };
       const vals = d.points.map(p => `<span>${esc(L(p.name))}: <b>${esc(fmtPoint(`${d.id}.${p.key}`))}</b></span>`).join('');
@@ -210,7 +342,7 @@ function renderDevices() {
         <td><div class="vals">${st.status === 'online' ? vals : `<span class="muted">${esc(t('devices.noData'))}</span>`}</div></td></tr>`;
     })
     .join('');
-  $('#devices').innerHTML = `<thead><tr><th>${esc(t('devices.colDevice'))}</th><th>${esc(t('devices.colConn'))}</th><th>${esc(t('devices.colValues'))}</th></tr></thead><tbody>${rows}</tbody>`;
+  $(`#${tableId}`).innerHTML = `<thead><tr><th>${esc(t('devices.colDevice'))}</th><th>${esc(t('devices.colConn'))}</th><th>${esc(t('devices.colValues'))}</th></tr></thead><tbody>${rows}</tbody>`;
 }
 
 /* ---------- Biểu đồ xu hướng (canvas) ---------- */
@@ -221,6 +353,7 @@ function thresholdsFor(point) {
 }
 
 async function loadTrend() {
+  if (S.view !== 'overview' || !S.cfg) return; // canvas ẩn thì không vẽ
   const point = $('#trend-point').value;
   const minutes = Number($('#trend-range').value);
   const data = await (await fetch(`/api/history?point=${encodeURIComponent(point)}&minutes=${minutes}`)).json();
@@ -296,9 +429,14 @@ async function loadFaults(method = 'GET', body) {
       method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body),
     });
     const { faults } = await res.json();
-    $('#faults').innerHTML = faults
-      .map(f => `<label class="fault ${f.active ? 'on' : ''}"><input type="checkbox" data-fault="${f.id}" ${f.active ? 'checked' : ''}>${esc(L(f.label))}</label>`)
-      .join('');
+    const group = (domain, key) => {
+      const items = faults.filter(f => (f.domain || 'cooling') === domain);
+      if (!items.length) return '';
+      return `<h3 class="fault-group">${esc(t(key))}</h3><div class="faults">${items
+        .map(f => `<label class="fault ${f.active ? 'on' : ''}"><input type="checkbox" data-fault="${f.id}" ${f.active ? 'checked' : ''}>${esc(L(f.label))}</label>`)
+        .join('')}</div>`;
+    };
+    $('#faults').innerHTML = group('cooling', 'sim.groupCooling') + group('power', 'sim.groupPower');
   } catch {
     $('#faults').innerHTML = `<div class="empty">${esc(t('sim.unreachable', { url: S.simUrl }))}</div>`;
   }
@@ -307,7 +445,9 @@ async function loadFaults(method = 'GET', body) {
 /* ---------- Khởi động ---------- */
 function render() {
   if (!S.snap || !S.snap.values) return;
-  renderKpis(); renderFloor(); renderAlarms(); renderDevices();
+  renderKpis(); renderAlarms();
+  renderFloor(); renderDevices('devices-cooling', 'cooling');
+  renderOneLine(); renderPdu(); renderDevices('devices-power', 'power');
 }
 
 function connect() {
@@ -324,23 +464,32 @@ async function init() {
   S.cfg = await (await fetch('/api/config')).json();
   // Deploy một cổng (SIM_PROXY=1): gọi bộ giả lập qua /sim trên cùng domain; chạy local: gọi thẳng cổng 5021
   S.simUrl = S.cfg.simControlPath || `${location.protocol}//${location.hostname}:${S.cfg.simControlPort}`;
-  for (const d of S.cfg.devices) for (const p of d.points) S.meta[`${d.id}.${p.key}`] = { name: p.name, uom: p.uom || '', enum: p.enum };
-  for (const p of S.cfg.derived) S.meta[p.id] = { name: p.name, uom: p.uom };
+  for (const d of S.cfg.devices) {
+    S.devDomain[d.id] = d.domain;
+    for (const p of d.points) S.meta[`${d.id}.${p.key}`] = { name: p.name, uom: p.uom || '', enum: p.enum, decimals: p.decimals, domain: d.domain };
+  }
+  for (const p of S.cfg.derived) S.meta[p.id] = { name: p.name, uom: p.uom, decimals: p.decimals, domain: p.domain };
   applyStatic();
-  buildFloor(); buildTrendSelect(); connect(); loadTrend(); loadFaults();
+  buildFloor(); buildOneLine(); buildTrendSelect();
+  showView(location.hash.slice(1));
+  connect(); loadFaults();
   setInterval(loadTrend, 5000);
   setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString(t('locale'), { hour12: false }); }, 1000);
   window.addEventListener('resize', loadTrend);
+  window.addEventListener('hashchange', () => showView(location.hash.slice(1)));
 
   document.addEventListener('click', async e => {
     const lang = e.target.closest('[data-lang]');
     if (lang) { setLang(lang.dataset.lang); return; }
+    const view = e.target.closest('[data-view]');
+    if (view) { window.history.replaceState(null, '', `${location.search}#${view.dataset.view}`); showView(view.dataset.view); return; }
     const ack = e.target.closest('[data-ack]');
     if (ack) {
       ack.disabled = true;
       await fetch(`/api/alarms/${ack.dataset.ack}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'operator' }) });
       S.snap.alarms = await (await fetch('/api/alarms')).json();
       render();
+      return;
     }
     const tab = e.target.closest('[data-tab]');
     if (tab) {

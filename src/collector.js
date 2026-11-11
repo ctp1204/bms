@@ -10,9 +10,19 @@ const round = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 function decodeDevice(device, registers) {
   const out = {};
   for (const p of device.points) {
-    const raw = registers[p.offset];
-    if (raw === undefined) continue;
-    const v = (p.signed ? toSigned16(raw) : raw) / (p.scale || 1);
+    let raw;
+    if (p.type === 'u32') {
+      // 32 bit không dấu chiếm 2 thanh ghi liền nhau, word cao trước (big-endian)
+      const hi = registers[p.offset];
+      const lo = registers[p.offset + 1];
+      if (hi === undefined || lo === undefined) continue;
+      raw = hi * 0x10000 + lo;
+    } else {
+      raw = registers[p.offset];
+      if (raw === undefined) continue;
+      if (p.signed) raw = toSigned16(raw);
+    }
+    const v = raw / (p.scale || 1);
     out[`${device.id}.${p.key}`] = round(v);
   }
   return out;
@@ -24,9 +34,11 @@ function derive(devices, values) {
   const sum = arr => arr.reduce((a, b) => a + b, 0);
   const out = {};
 
-  const it = pick('power_meter', 'it_kw')[0];
-  const facility = pick('power_meter', 'facility_kw')[0];
-  if (it > 0 && facility > 0) out['site.pue'] = round(facility / it);
+  // Tải IT đo ở đầu ra UPS; tổng điện cơ sở đo ở tủ MSB. Mất nguồn (MSB = 0) thì không tính PUE.
+  const it = pick('ups', 'out_kw')[0];
+  const facility = pick('power_meter', 'kw')[0];
+  if (typeof it === 'number') out['site.it_kw'] = round(it, 1);
+  if (it > 1 && facility > 0) out['site.pue'] = round(facility / it);
 
   const cooling = [...pick('crah', 'power_kw'), ...pick('chiller', 'power_kw')];
   if (cooling.length) out['site.cooling_kw'] = round(sum(cooling), 1);

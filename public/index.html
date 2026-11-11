@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BMS Demo</title>
+  <title>BMS · EPMS Demo</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
     <div>
-      <h1 id="site-name">BMS Demo</h1>
+      <h1 id="site-name">BMS · EPMS Demo</h1>
       <p class="sub" data-i18n="app.sub"></p>
     </div>
     <div class="top-right">
@@ -18,60 +18,100 @@
     </div>
   </header>
 
+  <nav class="views" role="tablist" data-i18n-aria="view.aria">
+    <button role="tab" data-view="overview"><span data-i18n="view.overview"></span> <span class="count" data-badge="all"></span></button>
+    <button role="tab" data-view="cooling"><span data-i18n="view.cooling"></span> <span class="count" data-badge="cooling"></span></button>
+    <button role="tab" data-view="power"><span data-i18n="view.power"></span> <span class="count" data-badge="power"></span></button>
+  </nav>
+
   <main>
     <section class="kpis" id="kpis" data-i18n-aria="kpi.aria"></section>
 
-    <section class="card">
-      <div class="card-head">
-        <h2 data-i18n="floor.title"></h2>
-        <div class="legend">
-          <span><i class="sw t-cool"></i>&lt; 18°C</span>
-          <span><i class="sw t-ok"></i>18–27°C</span>
-          <span><i class="sw t-warn"></i>27–32°C</span>
-          <span><i class="sw t-crit"></i>&gt; 32°C</span>
-          <span><i class="sw t-off"></i><span data-i18n="floor.offline"></span></span>
-        </div>
+    <!-- Tổng quan: mọi cảnh báo + xu hướng -->
+    <div class="view" data-panel="overview">
+      <div class="grid2">
+        <section class="card">
+          <div class="card-head">
+            <h2 data-i18n="alarms.title"></h2>
+            <div class="tabs" role="tablist">
+              <button role="tab" aria-selected="true" data-tab="active"><span data-i18n="alarms.tabActive"></span> <span id="alarm-count" class="count">0</span></button>
+              <button role="tab" aria-selected="false" data-tab="log" data-i18n="alarms.tabLog"></button>
+            </div>
+          </div>
+          <div id="alarms"></div>
+          <div id="events" hidden></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2 data-i18n="trend.title"></h2>
+            <div class="controls">
+              <select id="trend-point" data-i18n-aria="trend.pointAria"></select>
+              <select id="trend-range" data-i18n-aria="trend.rangeAria"></select>
+            </div>
+          </div>
+          <canvas id="trend" height="260"></canvas>
+          <p class="muted small" id="trend-note"></p>
+        </section>
       </div>
-      <div class="floor-wrap"><svg id="floor" viewBox="0 0 960 250" role="img" data-i18n-aria="floor.aria"></svg></div>
-    </section>
-
-    <div class="grid2">
-      <section class="card">
-        <div class="card-head">
-          <h2 data-i18n="alarms.title"></h2>
-          <div class="tabs" role="tablist">
-            <button role="tab" aria-selected="true" data-tab="active"><span data-i18n="alarms.tabActive"></span> <span id="alarm-count" class="count">0</span></button>
-            <button role="tab" aria-selected="false" data-tab="log" data-i18n="alarms.tabLog"></button>
-          </div>
-        </div>
-        <div id="alarms"></div>
-        <div id="events" hidden></div>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2 data-i18n="trend.title"></h2>
-          <div class="controls">
-            <select id="trend-point" data-i18n-aria="trend.pointAria"></select>
-            <select id="trend-range" data-i18n-aria="trend.rangeAria"></select>
-          </div>
-        </div>
-        <canvas id="trend" height="260"></canvas>
-        <p class="muted small" id="trend-note"></p>
-      </section>
     </div>
 
-    <section class="card">
-      <div class="card-head"><h2 data-i18n="devices.title"></h2><span class="muted small" data-i18n="devices.sub"></span></div>
-      <div class="table-wrap"><table id="devices"></table></div>
-    </section>
+    <!-- Làm mát -->
+    <div class="view" data-panel="cooling" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2 data-i18n="floor.title"></h2>
+          <div class="legend">
+            <span><i class="sw t-cool"></i>&lt; 18°C</span>
+            <span><i class="sw t-ok"></i>18–27°C</span>
+            <span><i class="sw t-warn"></i>27–32°C</span>
+            <span><i class="sw t-crit"></i>&gt; 32°C</span>
+            <span><i class="sw t-off"></i><span data-i18n="floor.offline"></span></span>
+          </div>
+        </div>
+        <div class="floor-wrap"><svg id="floor" viewBox="0 0 960 250" role="img" data-i18n-aria="floor.aria"></svg></div>
+      </section>
+      <div class="grid2">
+        <section class="card">
+          <div class="card-head"><h2 data-i18n="alarms.titleCooling"></h2></div>
+          <div id="alarms-cooling"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2 data-i18n="devices.titleCooling"></h2><span class="muted small" data-i18n="devices.sub"></span></div>
+          <div class="table-wrap"><table id="devices-cooling"></table></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Điện -->
+    <div class="view" data-panel="power" hidden>
+      <section class="card">
+        <div class="card-head"><h2 data-i18n="ol.title"></h2><span class="muted small" data-i18n="ol.note"></span></div>
+        <div class="floor-wrap"><svg id="oneline" viewBox="0 0 1000 290" role="img" data-i18n-aria="ol.aria"></svg></div>
+      </section>
+      <div class="grid2">
+        <section class="card">
+          <div class="card-head"><h2 data-i18n="alarms.titlePower"></h2></div>
+          <div id="alarms-power"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2 data-i18n="pdu.title"></h2></div>
+          <div class="table-wrap"><table id="pdu-table"></table></div>
+          <p class="muted small" data-i18n="pdu.note"></p>
+        </section>
+      </div>
+      <section class="card">
+        <div class="card-head"><h2 data-i18n="devices.titlePower"></h2><span class="muted small" data-i18n="devices.sub"></span></div>
+        <div class="table-wrap"><table id="devices-power"></table></div>
+      </section>
+    </div>
 
     <section class="card sim">
       <div class="card-head">
         <h2 data-i18n="sim.title"></h2>
         <span class="muted small" data-i18n-html="sim.sub"></span>
       </div>
-      <div id="faults" class="faults"></div>
+      <div id="faults"></div>
     </section>
   </main>
 
