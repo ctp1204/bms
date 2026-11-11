@@ -31,9 +31,11 @@ if (process.env.MODBUS_PORT) cfg.modbus.port = Number(process.env.MODBUS_PORT);
 
 const pointMeta = {};
 for (const d of cfg.devices) {
-  for (const p of d.points) pointMeta[`${d.id}.${p.key}`] = { name: p.name, uom: p.uom || '', device: d.id, enum: p.enum };
+  for (const p of d.points) {
+    pointMeta[`${d.id}.${p.key}`] = { name: p.name, uom: p.uom || '', device: d.id, enum: p.enum, decimals: p.decimals, domain: d.domain };
+  }
 }
-for (const p of cfg.derived) pointMeta[p.id] = { name: p.name, uom: p.uom, device: 'site' };
+for (const p of cfg.derived) pointMeta[p.id] = { name: p.name, uom: p.uom, device: 'site', decimals: p.decimals, domain: p.domain };
 const deviceNames = Object.fromEntries(cfg.devices.map(d => [d.id, d.name]));
 
 const client = new ModbusTcpClient(cfg.modbus);
@@ -121,7 +123,7 @@ const server = http.createServer(async (req, res) => {
         langs: LANGS,
         site: cfg.site,
         pollIntervalMs: cfg.pollIntervalMs,
-        devices: cfg.devices.map(({ id, name, type, unit, position, points }) => ({ id, name, type, unit, position, points })),
+        devices: cfg.devices.map(({ id, name, type, domain, unit, position, points }) => ({ id, name, type, domain, unit, position, points })),
         derived: cfg.derived,
         rules: rules.map(({ id, point, op, value, severity, type }) => ({ id, point, op, value, severity, type })),
         simControlPort: SIM_CONTROL_PORT,

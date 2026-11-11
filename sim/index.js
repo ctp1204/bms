@@ -4,7 +4,7 @@
 
 const http = require('http');
 const { createServer, ModbusException, EXCEPTION } = require('../src/modbus');
-const { Plant, FAULTS } = require('./plant');
+const { Plant, FAULTS, FAULT_DOMAIN } = require('./plant');
 
 // Dùng SIM_HOST (không dùng HOST) để khi BMS mở ra internet (HOST=0.0.0.0), bộ giả lập vẫn chỉ nằm nội bộ
 const HOST = process.env.SIM_HOST || '127.0.0.1';
@@ -47,7 +47,7 @@ function send(res, status, body) {
 }
 
 const faultList = () => ({
-  faults: Object.entries(FAULTS).map(([id, label]) => ({ id, label, active: plant.faults.has(id) })),
+  faults: Object.entries(FAULTS).map(([id, label]) => ({ id, label, domain: FAULT_DOMAIN[id], active: plant.faults.has(id) })),
 });
 
 http
