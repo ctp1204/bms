@@ -69,7 +69,8 @@ if (process.env.ITSM_ENABLED === '1') {
       devices: cfg.devices,
       statePath: path.join(DATA, 'itsm-state.json'),
       holdSec: holdSec === undefined || holdSec === '' ? undefined : Number(holdSec),
-      nocUrl: process.env.ITSM_NOC_URL || `http://127.0.0.1:${PORT}/`,
+      // Render tự đặt RENDER_EXTERNAL_URL (địa chỉ công khai của service) nên không cần khai báo thêm
+      nocUrl: process.env.ITSM_NOC_URL || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/` : `http://127.0.0.1:${PORT}/`),
       itopUrl: itsmUrl,
       log: m => console.log(`[itsm] ${m}`),
     });

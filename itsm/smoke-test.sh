@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 set -a; . ./.env; set +a
-URL="http://127.0.0.1:${ITOP_PORT:-8000}/webservices/rest.php?version=1.3"
+# Thử qua đường hầm: ITSM_URL=https://….trycloudflare.com/ ./smoke-test.sh
+BASE="${ITSM_URL:-http://127.0.0.1:${ITOP_PORT:-8000}/}"
+URL="${BASE%/}/webservices/rest.php?version=1.3"
 
 call() { # $1 = json_data
   curl -sf -X POST "$URL" --data-urlencode "auth_user=${ITSM_USER:-bms-itsm}" \
