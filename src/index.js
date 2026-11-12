@@ -86,7 +86,7 @@ collector.on('snapshot', snap => {
   history.push(snap.ts, snap.values);
   alarms.evaluate(snap);
   if (itsm) itsm.tick(snap.ts);
-  last = { ...snap, alarms: alarms.list() };
+  last = { ...snap, alarms: alarms.list(), itsm: itsm ? itsm.snapshot() : null };
   const msg = `data: ${JSON.stringify(last)}\n\n`;
   for (const res of sseClients) res.write(msg);
 });
@@ -177,7 +177,10 @@ const server = http.createServer(async (req, res) => {
       const user = String((body && JSON.parse(body).user) || 'operator').slice(0, 40);
       const a = alarms.ack(Number(ack[1]), user);
       if (!a) return json(res, 404, { error: 'Alarm not found' });
-      if (last) last.alarms = alarms.list();
+      if (last) {
+        last.alarms = alarms.list();
+        if (itsm) last.itsm = itsm.snapshot();
+      }
       return json(res, 200, a);
     }
     if (req.method === 'GET' && p === '/api/stream') {

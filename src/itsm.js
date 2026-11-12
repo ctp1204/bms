@@ -93,7 +93,10 @@ class ItsmConnector extends EventEmitter {
     const hasTicket = g.state === 'open' || g.state === 'opening';
 
     if (m.noteOnly) {
-      if (this._isOpen(g, now)) this._queue('note', g, { text: this._text(e.type === 'raised' ? 'info' : 'cleared', a, now) });
+      if (this._isOpen(g, now)) {
+        if (e.type === 'raised') g.linked[a.key] = true; // để giao diện hiện link tới ticket đã ghi chú
+        this._queue('note', g, { text: this._text(e.type === 'raised' ? 'info' : 'cleared', a, now) });
+      }
     } else if (e.type === 'raised') {
       const open = this._isOpen(g, now); // xét trước khi thêm cảnh báo này vào nhóm
       g.active[a.key] = {

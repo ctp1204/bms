@@ -279,6 +279,26 @@ function renderPdu() {
     <tbody>${rows}<tr class="sum"><td><b>${esc(t('pdu.total'))}</b></td><td>${num(val('pdua.total_kw'))}</td><td>${num(val('pdub.total_kw'))}</td><td><b>${num(val('site.it_kw'))}</b></td></tr></tbody>`;
 }
 
+/* ---------- ITSM (chỉ hiện khi máy chủ bật ITSM_ENABLED=1) ---------- */
+const ticketOf = a => (S.snap && S.snap.itsm && S.snap.itsm.tickets && S.snap.itsm.tickets[a.key]) || null;
+function ticketHtml(a) {
+  const tk = ticketOf(a);
+  if (!tk) return '';
+  const label = esc(t('itsm.ticket', { ref: tk.ref }));
+  return tk.url
+    ? ` · <a class="ticket" href="${esc(tk.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(t('itsm.ticketAria', { ref: tk.ref }))}">${label}</a>`
+    : ` · <span class="ticket">${label}</span>`;
+}
+function renderItsm() {
+  const x = S.snap.itsm;
+  const box = $('#itsm-status');
+  box.hidden = !x;
+  if (!x) return;
+  $('#itsm-dot').className = `dot ${{ ok: 'on', retrying: 'warn', error: 'err' }[x.state] || ''}`;
+  $('#itsm-text').textContent = t(`itsm.${x.state}`, { n: x.queue });
+  box.title = x.lastError ? t('itsm.lastError', { e: x.lastError }) : '';
+}
+
 /* ---------- Cảnh báo ---------- */
 function alarmHtml(list, emptyKey) {
   if (!list.length) return `<div class="empty">${esc(t(emptyKey))}</div>`;
@@ -288,7 +308,7 @@ function alarmHtml(list, emptyKey) {
       const ack = a.ackedAt ? t('alarms.ackedBy', { u: a.ackedBy }) : '';
       return `<div class="alarm ${a.clearedAt ? 'cleared' : 'active'} ${a.ackedAt ? 'acked' : 'unacked'}">
         <span class="sev ${a.severity}">${esc(t(`sev.${a.severity}`))}</span>
-        <div><div class="msg">${esc(alarmText(a))}</div><div class="meta">${time(a.raisedAt)} · ${esc(state)}${ack ? ` · ${esc(ack)}` : ''}</div></div>
+        <div><div class="msg">${esc(alarmText(a))}</div><div class="meta">${time(a.raisedAt)} · ${esc(state)}${ack ? ` · ${esc(ack)}` : ''}${ticketHtml(a)}</div></div>
         ${a.ackedAt ? '' : `<button class="btn" data-ack="${a.id}">${esc(t('alarms.ack'))}</button>`}
       </div>`;
     })
@@ -296,7 +316,7 @@ function alarmHtml(list, emptyKey) {
 }
 // Chỉ vẽ lại khi danh sách thay đổi, để nút Xác nhận không bị thay giữa chừng
 function renderAlarmBox(el, list, emptyKey) {
-  const sig = JSON.stringify(list.map(a => [a.id, a.clearedAt, a.ackedAt, a.value]));
+  const sig = JSON.stringify(list.map(a => [a.id, a.clearedAt, a.ackedAt, a.value, (ticketOf(a) || {}).ref]));
   if (S.sigs[el.id] === sig) return;
   S.sigs[el.id] = sig;
   el.innerHTML = alarmHtml(list, emptyKey);
@@ -445,7 +465,7 @@ async function loadFaults(method = 'GET', body) {
 /* ---------- Khởi động ---------- */
 function render() {
   if (!S.snap || !S.snap.values) return;
-  renderKpis(); renderAlarms();
+  renderKpis(); renderAlarms(); renderItsm();
   renderFloor(); renderDevices('devices-cooling', 'cooling');
   renderOneLine(); renderPdu(); renderDevices('devices-power', 'power');
 }

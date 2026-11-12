@@ -86,6 +86,7 @@ test('utility outage: one P1 ticket for the power team, later alarms become note
   assert.match(logs(client.updates[3]), /Thông tin: ATS đang cấp từ máy phát/);
   assert.ok(!client.updates.some(u => u.fields.urgency), 'nothing outranks P1');
   assert.equal(conn.snapshot().tickets['utility_lost:ats1.utility_ok'].ref, 'I-000001');
+  assert.equal(conn.snapshot().tickets['on_generator:ats1.source'].ref, 'I-000001', 'note-only alarms link to the ticket they were noted on');
 });
 
 test('warning waits for the hold time; a warning that clears in time never opens a ticket', async () => {
