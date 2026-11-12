@@ -1,0 +1,42 @@
+# iTop (ITSM) cho bản demo: chỉ chạy ở máy local, không deploy lên Render.
+# Image iTop dựng từ bản cộng đồng vbkunin/itop:3.2.2-base (không phải của Combodo), thêm mariadb-client (xem Dockerfile).
+# Mật khẩu lấy từ itsm/.env (không commit). Tạo bằng: cp itsm/.env.example itsm/.env
+name: bms-itsm
+
+services:
+  itop:
+    build: .
+    image: bms-itsm-itop:3.2.2
+    ports:
+      - "127.0.0.1:${ITOP_PORT:-8000}:80"
+    volumes:
+      - itop-conf:/var/www/html/conf
+      - itop-data:/var/www/html/data
+    post_start:
+      - command: chown -R www-data:www-data /var/www/html/conf /var/www/html/data
+        user: root
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11.4
+    volumes:
+      - db-data:/var/lib/mysql
+    environment:
+      MARIADB_DATABASE: itop
+      MARIADB_USER: itop
+      MARIADB_PASSWORD: ${ITOP_DB_PASSWORD:?Đặt ITOP_DB_PASSWORD trong itsm/.env}
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  itop-conf:
+  itop-data:
+  db-data:

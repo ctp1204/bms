@@ -1,0 +1,158 @@
+{
+  "$comment": "Quy tắc tạo ticket ITSM từ cảnh báo (Giai đoạn 0). Gom cảnh báo theo nhóm sự cố: cảnh báo đầu tiên tạo ticket, các cảnh báo sau trong cùng nhóm chỉ thêm ghi chú và nâng ưu tiên nếu nặng hơn. Mọi luật trong alarms.json phải xuất hiện đúng một lần: trong groups[].rules, groups[].noteOnly hoặc ignore.",
+
+  "defaults": {
+    "$comment": "warningHoldSec ghi đè được bằng biến môi trường ITSM_WARNING_HOLD_SEC (demo: 30). Thời gian chờ chỉ áp dụng khi cảnh báo warning là cái tạo ticket; nếu nhóm đã có ticket mở thì ghi chú ngay.",
+    "ticketClass": "Incident",
+    "origin": "monitoring",
+    "callerName": "BMS-EPMS Monitor",
+    "warningHoldSec": 300,
+    "groupOpenAfterClearSec": 1800,
+    "autoClose": false,
+    "downgradePriority": false
+  },
+
+  "itop": {
+    "$comment": "Tên đối tượng trong iTop. itsm/bootstrap.php tạo chúng; bộ nối dùng để tìm lại.",
+    "organization": "DXAI Data Center",
+    "deliveryModel": "DC Operations",
+    "callerFirstName": "BMS-EPMS",
+    "callerLastName": "Monitor"
+  },
+
+  "cmdb": {
+    "$comment": "Ánh xạ thiết bị trong devices.json sang CI trong iTop. Khóa liên kết là asset_number = assetPrefix + id thiết bị. rack_sensor ánh xạ thành Rack vì cảnh báo nhiệt nói về rack. PDU sàn dùng PowerSource vì lớp PDU của iTop bắt buộc nằm trong một rack. iTop không có lớp thiết bị làm mát nên tạm dùng Peripheral.",
+    "location": "Phòng máy 1",
+    "assetPrefix": "bms:",
+    "status": "production",
+    "classByType": {
+      "crah": "Peripheral",
+      "chiller": "Peripheral",
+      "leak": "Peripheral",
+      "rack_sensor": "Rack",
+      "power_meter": "PowerSource",
+      "ups": "PowerSource",
+      "generator": "PowerSource",
+      "ats": "PowerSource",
+      "pdu": "PowerSource"
+    },
+    "criticalityByType": {
+      "crah": "high",
+      "chiller": "high",
+      "leak": "medium",
+      "rack_sensor": "high",
+      "power_meter": "high",
+      "ups": "high",
+      "generator": "high",
+      "ats": "high",
+      "pdu": "high"
+    }
+  },
+
+  "teams": {
+    "power": { "vi": "Điện", "ja": "電源", "itop": "DC Power" },
+    "cooling": { "vi": "Làm mát", "ja": "空調", "itop": "DC Cooling" },
+    "ot": { "vi": "Giám sát (OT)", "ja": "監視（OT）", "itop": "DC OT Monitoring" }
+  },
+
+  "priorities": {
+    "$comment": "SLA tạm dùng cho demo: ttoMin = thời gian phản hồi, ttrMin = thời gian xử lý (phút). Trong iTop, ưu tiên = ma trận impact × urgency; với impact 2 (A service) thì ưu tiên bằng đúng urgency.",
+    "P1": { "name": { "vi": "Khẩn cấp", "ja": "緊急" }, "itop": { "impact": 2, "urgency": 1 }, "ttoMin": 15, "ttrMin": 240 },
+    "P2": { "name": { "vi": "Cao", "ja": "高" }, "itop": { "impact": 2, "urgency": 2 }, "ttoMin": 30, "ttrMin": 480 },
+    "P3": { "name": { "vi": "Trung bình", "ja": "中" }, "itop": { "impact": 2, "urgency": 3 }, "ttoMin": 240, "ttrMin": 1440 },
+    "P4": { "name": { "vi": "Thấp", "ja": "低" }, "itop": { "impact": 2, "urgency": 4 }, "ttoMin": 1440, "ttrMin": 7200 }
+  },
+
+  "groups": [
+    {
+      "id": "power_source",
+      "name": { "vi": "Sự cố nguồn cấp", "ja": "給電障害" },
+      "team": "power",
+      "scope": "site",
+      "$comment": "crah_stopped và chiller_stopped thuộc nhóm này vì trong demo chúng chỉ xảy ra khi mất nguồn sau ATS.",
+      "rules": {
+        "utility_lost": "P1",
+        "no_source": "P1",
+        "ups_battery": "P1",
+        "ups_runtime_low": "P1",
+        "gen_fail": "P1",
+        "crah_stopped": "P1",
+        "gen_fuel_low": "P2",
+        "chiller_stopped": "P2"
+      },
+      "noteOnly": ["on_generator"]
+    },
+    {
+      "id": "ups_bypass",
+      "name": { "vi": "UPS chạy bypass", "ja": "UPS バイパス運転" },
+      "team": "power",
+      "scope": "site",
+      "rules": { "ups_bypass": "P3" }
+    },
+    {
+      "id": "pdu_load",
+      "name": { "vi": "Nguồn và tải PDU", "ja": "PDU の電源・負荷" },
+      "team": "power",
+      "scope": "device",
+      "$comment": "pdu_input_lost là P2: rack vẫn còn nguồn bên kia.",
+      "rules": {
+        "pdu_overload_crit": "P1",
+        "pdu_input_lost": "P2",
+        "pdu_overload": "P3",
+        "pdu_redundancy": "P3"
+      }
+    },
+    {
+      "id": "power_quality",
+      "name": { "vi": "Chất lượng điện", "ja": "電力品質" },
+      "team": "power",
+      "scope": "site",
+      "rules": { "thd_high": "P3" }
+    },
+    {
+      "id": "crah",
+      "name": { "vi": "CRAH hỏng", "ja": "CRAH 故障" },
+      "team": "cooling",
+      "scope": "device",
+      "$comment": "P2: thực tế CRAH thường có dự phòng N+1. Nếu phòng quá nhiệt thì nhóm room_heat tạo ticket P1 riêng.",
+      "rules": { "crah_fault": "P2" }
+    },
+    {
+      "id": "chiller",
+      "name": { "vi": "Sự cố chiller", "ja": "チラー障害" },
+      "team": "cooling",
+      "scope": "site",
+      "rules": { "chiller_fault": "P2", "chw_high": "P3" }
+    },
+    {
+      "id": "room_heat",
+      "name": { "vi": "Quá nhiệt phòng máy", "ja": "サーバールームの過熱" },
+      "team": "cooling",
+      "scope": "site",
+      "rules": { "rack_hot_crit": "P1", "rack_hot_warn": "P3" }
+    },
+    {
+      "id": "humidity",
+      "name": { "vi": "Độ ẩm ngoài ngưỡng", "ja": "湿度の逸脱" },
+      "team": "cooling",
+      "scope": "site",
+      "rules": { "rack_humid_high": "P4", "rack_humid_low": "P4" }
+    },
+    {
+      "id": "leak",
+      "name": { "vi": "Rò rỉ nước", "ja": "漏水" },
+      "team": "cooling",
+      "scope": "site",
+      "rules": { "leak": "P1" }
+    },
+    {
+      "id": "comm",
+      "name": { "vi": "Mất kết nối thiết bị", "ja": "機器の通信断" },
+      "team": "ot",
+      "scope": "device",
+      "rules": { "comm_loss": "P3" }
+    }
+  ],
+
+  "ignore": ["pue_high"]
+}

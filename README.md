@@ -4,6 +4,8 @@ Lớp giám sát hợp nhất **chỉ đọc** cho phòng máy trung tâm dữ l
 
 Toàn bộ thiết bị là **giả lập**. Ứng dụng viết bằng Node.js thuần, **không dùng thư viện ngoài**.
 
+Tùy chọn: nối với **iTop (ITSM)** để cảnh báo tự tạo ticket, gom theo sự cố ([mục 13](#13-itsm-với-itop-tùy-chọn)).
+
 ---
 
 ## Mục lục
@@ -20,7 +22,8 @@ Toàn bộ thiết bị là **giả lập**. Ứng dụng viết bằng Node.js 
 10. [HTTP API](#10-http-api)
 11. [Kiểm thử](#11-kiểm-thử)
 12. [Deploy lên Render](#12-deploy-lên-render)
-13. [Giới hạn hiện tại](#13-giới-hạn-hiện-tại)
+13. [ITSM với iTop (tùy chọn)](#13-itsm-với-itop-tùy-chọn)
+14. [Giới hạn hiện tại](#14-giới-hạn-hiện-tại)
 
 ---
 
@@ -39,6 +42,7 @@ Hai hệ thống phụ thuộc lẫn nhau. Ví dụ: mất điện lưới thì 
 - **Phần mua** (thiết bị, bộ điều khiển, logic ATS): được mô phỏng trong `sim/`.
 - **Phần tự xây** (đọc dữ liệu, cảnh báo, lịch sử, dashboard): là ứng dụng trong `src/` và `public/`.
 - Ứng dụng **không bao giờ gửi lệnh ghi** xuống thiết bị. Modbus client chỉ có hàm đọc, và có test khẳng định điều này.
+- **ITSM** cũng theo mô hình đó: dùng nền tảng có sẵn (iTop), chỉ tự viết phần nối cảnh báo → ticket và đồng bộ thiết bị vào CMDB.
 
 ---
 
@@ -105,6 +109,8 @@ Luồng một giá trị, ví dụ nhiệt độ rack R1 = 25,3°C:
 4. Tính chỉ số dẫn xuất: PUE, inlet cao nhất, tải IT, điện làm mát.
 5. Snapshot đi tới lịch sử, bộ cảnh báo và SSE; trình duyệt cập nhật ngay, không cần tải lại trang.
 
+Khi bật ITSM, bộ cảnh báo còn đẩy sự kiện sang `itsm.js`, rồi qua hàng đợi tới REST API của iTop. Hàng đợi chạy riêng, nên iTop chậm hay sập cũng không làm chậm việc đọc thiết bị và phát cảnh báo.
+
 ---
 
 ## 4. Cấu trúc thư mục
@@ -113,7 +119,8 @@ Luồng một giá trị, ví dụ nhiệt độ rack R1 = 25,3°C:
 bms/
 ├── config/
 │   ├── devices.json      # thiết bị, thanh ghi, tên vi/ja, chỉ số dẫn xuất
-│   └── alarms.json       # luật cảnh báo (25 luật), nội dung vi/ja
+│   ├── alarms.json       # luật cảnh báo (25 luật), nội dung vi/ja
+│   └── itsm.json         # quy tắc tạo ticket: nhóm sự cố, ưu tiên, SLA, ánh xạ CMDB
 ├── sim/
 │   ├── plant.js          # mô hình vật lý làm mát + điện, danh sách sự cố
 │   └── index.js          # Modbus gateway :5020 + API sự cố :5021
@@ -124,16 +131,27 @@ bms/
 │   ├── history.js        # lịch sử trong bộ nhớ (6 giờ)
 │   ├── locale.js         # hỗ trợ đa ngôn ngữ phía máy chủ
 │   ├── auth.js           # Basic Auth cho bản deploy
+│   ├── itop.js           # client REST của iTop (http/https có sẵn của Node)
+│   ├── itsm.js           # bộ nối cảnh báo → ticket, hàng đợi có thử lại
+│   ├── itsm-cmdb.js      # đồng bộ thiết bị vào CMDB của iTop
 │   └── index.js          # máy chủ HTTP, API, SSE, proxy /sim
 ├── public/
 │   ├── index.html        # dashboard 3 tab
 │   ├── app.js            # logic giao diện, sơ đồ phòng máy, sơ đồ một sợi, biểu đồ
 │   ├── i18n.js           # từ điển giao diện vi/ja
 │   └── style.css
-├── scripts/start.js      # chạy bộ giả lập và ứng dụng thành 2 tiến trình
+├── scripts/
+│   ├── start.js          # chạy bộ giả lập và ứng dụng thành 2 tiến trình
+│   └── itsm-cmdb-sync.js # npm run itsm:cmdb
+├── itsm/                 # iTop chạy bằng Docker (chỉ ở máy local)
+│   ├── docker-compose.yml, Dockerfile
+│   ├── install.sh        # cài iTop tự động, không cần wizard
+│   ├── bootstrap.sh/.php # tổ chức, nhóm xử lý, tài khoản API
+│   ├── smoke-test.sh     # thử REST API
+│   └── .env.example      # mẫu mật khẩu; .env thật không commit
 ├── test/                 # test bằng node:test
 ├── render.yaml           # cấu hình deploy Render (Blueprint)
-└── data/                 # nhật ký cảnh báo khi chạy (không commit)
+└── data/                 # nhật ký cảnh báo, trạng thái ITSM khi chạy (không commit)
 ```
 
 ---
@@ -273,6 +291,12 @@ Biến dùng được trong `message`: `{device}`, `{name}`, `{value}`, `{uom}`.
 | `SIM_PROXY` | (tắt) | `1`: ứng dụng chuyển tiếp `/sim/api/faults` sang bộ giả lập, để chạy trên một cổng duy nhất |
 | `BASIC_AUTH_USER` | `demo` | Tên đăng nhập |
 | `BASIC_AUTH_PASSWORD` | (trống) | Có giá trị thì bật đăng nhập; để trống thì không cần đăng nhập |
+| `ITSM_ENABLED` | (tắt) | `1`: bật bộ nối cảnh báo → ticket iTop |
+| `ITSM_URL` | `http://127.0.0.1:8000/` | Địa chỉ iTop |
+| `ITSM_USER`, `ITSM_PASSWORD` | `bms-itsm`, (trống) | Tài khoản API tạo ticket. Thiếu mật khẩu thì ITSM tự tắt |
+| `ITSM_WARNING_HOLD_SEC` | `300` (trong `itsm.json`) | Cảnh báo mức warning phải kéo dài bao lâu mới tạo ticket. Demo: `30` |
+| `ITSM_NOC_URL` | `http://127.0.0.1:<PORT>/` | Link NOC ghi trong ticket |
+| `ITSM_CMDB_USER`, `ITSM_CMDB_PASSWORD` | `bms-cmdb` | Tài khoản riêng cho `npm run itsm:cmdb` |
 
 Ví dụ chạy song song với một bản khác:
 
@@ -293,6 +317,7 @@ PORT=8081 SIM_MODBUS_PORT=5030 SIM_CONTROL_PORT=5031 MODBUS_PORT=5030 npm start
 | GET | `/api/alarms` | Danh sách cảnh báo hiện tại |
 | POST | `/api/alarms/:id/ack` | Xác nhận cảnh báo, body `{"user":"operator"}` |
 | GET | `/api/events?limit=50` | Nhật ký sự kiện cảnh báo gần nhất |
+| GET | `/api/itsm` | Trạng thái kết nối iTop, số lệnh chờ, ticket của từng cảnh báo (`{"enabled":false}` khi tắt) |
 | GET | `/api/stream` | Server-Sent Events, đẩy snapshot mỗi 2 giây |
 | GET, POST | `/sim/api/faults` | Chỉ khi `SIM_PROXY=1`: chuyển tiếp tới API sự cố của bộ giả lập |
 
@@ -303,9 +328,12 @@ Khi bật `BASIC_AUTH_PASSWORD`, mọi đường dẫn trừ `/healthz` đều c
 ## 11. Kiểm thử
 
 ```bash
-npm test         # 31 test: Modbus, bộ cảnh báo, mô hình làm mát + điện, bộ thu thập, đa ngôn ngữ, Basic Auth
+npm test         # 61 test: Modbus, bộ cảnh báo, mô hình làm mát + điện, bộ thu thập, đa ngôn ngữ, Basic Auth, ITSM
 npm run check    # kiểm tra cú pháp mọi file JavaScript
+node --test --experimental-test-coverage test/   # đo độ phủ, có sẵn trong Node
 ```
+
+Test ITSM dùng iTop giả (HTTP server nhỏ trong test), nên `npm test` không cần Docker. Bản iTop thật được thử bằng `itsm/smoke-test.sh`.
 
 Một số test đáng chú ý:
 
@@ -314,6 +342,7 @@ Một số test đáng chú ý:
 - Máy phát không khởi động: pin cạn và mất tải IT.
 - PDU-A mất nguồn: PDU-B gánh toàn bộ tải.
 - Mọi chuỗi trong cấu hình và giao diện có đủ tiếng Việt và tiếng Nhật.
+- ITSM, chạy với bộ cảnh báo thật: mất điện lưới chỉ tạo **một** ticket P1; iTop mất kết nối thì thử lại và gửi đúng một lần; khởi động lại không tạo ticket trùng.
 
 ---
 
@@ -340,7 +369,70 @@ Lưu ý gói miễn phí:
 
 ---
 
-## 13. Giới hạn hiện tại
+## 13. ITSM với iTop (tùy chọn)
+
+Cảnh báo tự tạo **Incident** trong [iTop](https://www.combodo.com/itop) (ITSM mã nguồn mở), gắn với thiết bị trong CMDB. Theo khuyến nghị "mua, không xây từ đầu": ticket, SLA, quy trình là của iTop; repo này chỉ viết phần nối. Mặc định **tắt**; bản trên Render không dùng ITSM.
+
+### Quy tắc tạo ticket
+
+Toàn bộ nằm trong `config/itsm.json`. Test sẽ báo lỗi nếu có luật cảnh báo chưa được ánh xạ.
+
+- **Gom theo nhóm sự cố**, không phải một cảnh báo một ticket. Cảnh báo đầu tiên mở ticket; các cảnh báo sau trong nhóm thành ghi chú, gắn thêm thiết bị và **nâng** ưu tiên nếu nặng hơn. Ví dụ mất điện lưới: 6 cảnh báo điện thành một ticket cho đội Điện.
+- **10 nhóm, 3 nhóm xử lý:** Nguồn cấp, UPS bypass, Tải PDU (mỗi PDU một ticket), Chất lượng điện → *DC Power*; CRAH (mỗi máy một ticket), Chiller, Quá nhiệt phòng, Độ ẩm, Rò rỉ nước → *DC Cooling*; Mất kết nối (mỗi thiết bị một ticket) → *DC OT Monitoring*.
+- **Ưu tiên P1–P4** kèm SLA demo (phản hồi / xử lý): P1 15 phút / 4 giờ · P2 30 phút / 8 giờ · P3 4 giờ / 24 giờ · P4 1 ngày / 5 ngày. Trong iTop: impact 2 + urgency 1–4.
+- **Mức warning** chỉ tạo ticket nếu còn sau 5 phút (demo: 30 giây). Nếu nhóm đã có ticket thì ghi chú ngay. **Mức info** không tạo ticket.
+- **Không tự đóng, không tự hạ ưu tiên.** Khi mọi cảnh báo trong nhóm đã hết, ticket nhận ghi chú "chờ người trực kiểm tra và đóng". Cảnh báo quay lại trong 30 phút thì ghi vào ticket cũ; sau đó, hoặc nếu ticket đã bị đóng, thì mở ticket mới có tham chiếu ticket cũ.
+- **Không làm chậm giám sát:** mọi lệnh gửi iTop đi qua hàng đợi lưu trong `data/itsm-state.json`. iTop lỗi thì thử lại (2 → 4 → … → 60 giây); khởi động lại ứng dụng không tạo ticket trùng.
+
+### Cài đặt (một lần)
+
+Cần Docker và **Node.js 20.6 trở lên** cho lệnh `npm run start:itsm` (dùng `--env-file`).
+
+```bash
+cd itsm
+cp .env.example .env            # đổi cả 4 mật khẩu trong .env
+docker compose up -d --build    # iTop 3.2.2 + MariaDB, chỉ mở ở 127.0.0.1:8000
+./install.sh                    # cài iTop tự động (ITIL + module trung tâm dữ liệu)
+./bootstrap.sh                  # tổ chức, 3 nhóm xử lý, tài khoản API bms-itsm và bms-cmdb
+./smoke-test.sh                 # thử REST API (tạo vài ticket [SMOKE], có thể đóng tay)
+cd ..
+npm run itsm:cmdb               # đưa 16 thiết bị vào CMDB; chạy lại được bất cứ lúc nào
+```
+
+Đăng nhập iTop ở http://127.0.0.1:8000 bằng `admin` với mật khẩu `ITOP_ADMIN_PASSWORD` trong `itsm/.env`. Hai tài khoản API chỉ có quyền tối thiểu: `bms-itsm` tạo và cập nhật ticket, `bms-cmdb` chỉ quản lý CI.
+
+### Chạy
+
+```bash
+npm run start:itsm              # như npm start, nhưng đọc itsm/.env và bật ITSM
+```
+
+Trên dashboard, header có thêm trạng thái `iTop: đã kết nối` (hoặc `đang thử lại`). Cảnh báo đã có ticket hiện link `Ticket I-…`, bấm vào để mở trong iTop.
+
+Xóa sạch iTop để làm lại từ đầu: `cd itsm && docker compose down -v`, rồi xóa `data/itsm-state.json`.
+
+### Kịch bản demo 5: từ cảnh báo đến ticket
+
+Khoảng 6 phút. Tiếp nối kịch bản 3 và 4 trong tài liệu giải thích (xem cuối trang). Chuẩn bị: iTop đang chạy, `npm run start:itsm` (nên `SIM_SPEED=2`), mở dashboard ở tab **Điện** và iTop ở một tab khác. Header hiện `iTop: sẵn sàng`.
+
+| # | Thao tác | Người xem thấy | Lời giải thích |
+|---|---|---|---|
+| 1 | Bật **Mất điện lưới** | Trong vài giây: iTop có Incident **P1** "[Điện] Sự cố nguồn cấp: Mất điện lưới", nhóm *DC Power*, gắn CI ATS-1. Trên dashboard, cảnh báo hiện `Ticket I-…`; header chuyển `iTop: đã kết nối` | "Cảnh báo nghiêm trọng mở ticket ngay, gán đúng nhóm, gắn đúng thiết bị. Không ai phải gõ tay." |
+| 2 | Chờ khoảng 10 giây, mở ticket trong iTop | Nhật ký ticket có "Phát sinh thêm: UPS-1 đang chạy pin", "Không có nguồn sau ATS", "CRAH dừng". Danh sách CI có thêm UPS-1, CRAH-1, CRAH-2 | "Sáu cảnh báo điện, **một** ticket. Người trực thấy cả chuỗi sự cố ở một chỗ thay vì sáu ticket rời rạc." Nếu nước lạnh hoặc nhiệt rack vượt ngưỡng quá 30 giây, đội Làm mát nhận ticket riêng: đúng, vì họ là người xử lý phần đó. |
+| 3 | Chỉ vào mô tả ticket | Nhóm sự cố, nhóm xử lý, ưu tiên kèm hạn SLA, danh sách cảnh báo kèm giờ, link quay về NOC; bản tiếng Nhật ở dưới | "Ticket đủ thông tin để xử lý mà không cần hỏi lại người trực." |
+| 4 | Bấm **Xác nhận** một cảnh báo trên dashboard | Ticket nhận ghi chú "Đã xác nhận trên NOC bởi operator" | "Thao tác trên NOC và ticket luôn khớp nhau." |
+| 5 | Tắt **Mất điện lưới**, chờ khoảng 30 giây | Ticket nhận "Đã hết: …" cho từng cảnh báo, rồi "Tất cả cảnh báo trong nhóm đã hết. Chờ người trực kiểm tra và đóng ticket". Ticket **vẫn mở** | "Hệ thống không tự đóng ticket. Người trực kiểm tra hiện trường rồi mới đóng." |
+| 6 | Bật **CRAH-1 hỏng** | Ngay lập tức: ticket **P2** "CRAH hỏng" cho nhóm *DC Cooling*. Vài phút sau rack vượt 27°C, nhưng phải **30 giây sau** mới có ticket P3 "Quá nhiệt phòng máy". Khi vượt 32°C, ticket đó được **nâng lên P1** | "Lỗi thiết bị báo ngay; vượt ngưỡng nhẹ thì chờ cho chắc chắn, tránh tạo ticket rác. Nặng lên thì tự nâng ưu tiên." |
+| 7 | (Tùy chọn) `docker compose stop itop` trong `itsm/`, rồi bật **PDU-A mất nguồn** | Cảnh báo vẫn hiện bình thường. Header: `iTop: lỗi, đang thử lại (1 lệnh chờ)` | "ITSM sập không ảnh hưởng tới giám sát." |
+| 8 | `docker compose start itop`, chờ khoảng 1 phút | Header về `iTop: đã kết nối`, ticket PDU-A được tạo bù | "Không mất ticket nào trong lúc iTop sập." |
+
+Kết thúc: tắt mọi sự cố, đóng các ticket trong iTop.
+
+**Thông điệp chốt:** một sự cố là một ticket, đúng nhóm, đúng thiết bị, đúng ưu tiên. ITSM là phần mua; giá trị tự xây nằm ở phần nối giúp ticket phản ánh đúng thực tế phòng máy.
+
+---
+
+## 14. Giới hạn hiện tại
 
 | Chưa có | Ghi chú |
 |---|---|
@@ -348,11 +440,14 @@ Lưu ý gói miễn phí:
 | BACnet/IP, SNMP, OPC UA | Mới có Modbus TCP. BACnet/IP là việc lớn nhất để nối BMS thật |
 | Lưu lịch sử lâu dài | Lịch sử chỉ trong bộ nhớ 6 giờ; nên dùng InfluxDB hoặc TimescaleDB |
 | Phân quyền nhiều tài khoản | Chỉ có Basic Auth một tài khoản |
-| Gửi cảnh báo ra ngoài | Chưa có email, Telegram, ticket |
+| Gửi cảnh báo ra ngoài | Đã có ticket iTop (tùy chọn); chưa có email, Telegram |
+| SLA thật trong iTop | Hạn SLA mới ghi trong nội dung ticket; chưa cấu hình hợp đồng, dịch vụ, SLA/SLT trong iTop |
+| Lớp CI cho thiết bị làm mát | iTop không có sẵn; CRAH, chiller, dây rò rỉ tạm dùng `Peripheral`. Làm đúng cần viết extension iTop |
+| ITSM trên Render | Gói miễn phí không chạy được iTop + MariaDB; ITSM chỉ demo ở máy local |
 | Phân tích chất lượng điện, SOE, đo đếm tính tiền | Nên mua: cần đồng hồ đo chuyên dụng |
 | Báo cáo kWh theo khách hàng | Dữ liệu kWh đã có; chưa có báo cáo |
 | Máy chủ dự phòng, tách mạng OT/IT | Cần khi triển khai thật |
 
 ---
 
-Tài liệu giải thích chi tiết kèm sơ đồ tương tác, kịch bản demo và bảng thuật ngữ (song ngữ Việt/Nhật): **Bên trong BMS Demo** — https://claude.ai/artifact/RsdNUtqKDUrx5ZSVHs6QF6 (chia sẻ trong tổ chức).
+Tài liệu giải thích chi tiết kèm sơ đồ tương tác, kịch bản demo 1–4 và bảng thuật ngữ (song ngữ Việt/Nhật): **Bên trong BMS · EPMS Demo** — https://claude.ai/artifact/RsdNUtqKDUrx5ZSVHs6QF6 (chia sẻ trong tổ chức).

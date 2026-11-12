@@ -33,6 +33,9 @@ html:lang(ja) body { font-family: system-ui, -apple-system, "Segoe UI", "Hiragin
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); }
 .dot.on { background: var(--ok); }
 .dot.err { background: var(--crit); }
+.dot.warn { background: var(--warn); }
+.itsm { font-size: .85rem; color: var(--muted); }
+.alarm .meta .ticket { font-weight: 600; color: var(--accent); white-space: nowrap; }
 
 main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; }
 @media (max-width: 600px) { main, .top { padding-left: 16px; padding-right: 16px; } }
