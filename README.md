@@ -148,7 +148,7 @@ bms/
 │   ├── install.sh        # cài iTop tự động, không cần wizard
 │   ├── bootstrap.sh/.php # tổ chức, nhóm xử lý, tài khoản API
 │   ├── smoke-test.sh     # thử REST API (local hoặc qua đường hầm)
-│   ├── tunnel.sh         # mở iTop qua Cloudflare Quick Tunnel cho bản Render
+│   ├── tunnel.sh         # mở iTop qua đường hầm (ngrok hoặc Cloudflare) cho bản Render
 │   └── .env.example      # mẫu mật khẩu; .env thật không commit
 ├── test/                 # test bằng node:test
 ├── render.yaml           # cấu hình deploy Render (Blueprint)
@@ -414,24 +414,36 @@ Xóa sạch iTop để làm lại từ đầu: `cd itsm && docker compose down -
 
 ### Dùng ITSM với bản trên Render (miễn phí)
 
-Render free không chạy được iTop (cần MariaDB và ổ đĩa lưu dữ liệu, gói free không có). Cách miễn phí: **demo vẫn ở Render, iTop chạy ở máy bạn**, mở ra internet qua Cloudflare Quick Tunnel (không cần tài khoản, chạy bằng Docker).
+Render free không chạy được iTop (cần MariaDB và ổ đĩa lưu dữ liệu, gói free không có). Cách miễn phí: **demo vẫn ở Render, iTop chạy ở máy bạn**, mở ra internet qua một đường hầm HTTPS chạy bằng Docker.
 
 ```
-Người xem ──► Demo trên Render ──REST──► https://….trycloudflare.com ──► iTop trên máy bạn
+Người xem ──► Demo trên Render ──REST──► https://<tên miền ngrok> ──► iTop trên máy bạn
 ```
 
-1. Trên máy có iTop: `./itsm/tunnel.sh`. Script cấu hình iTop chạy sau đường hầm, bật đường hầm, kiểm tra đường hầm trả lời, rồi in ra địa chỉ.
-2. Trên Render: **Dashboard → bms-demo → Environment**, đặt `ITSM_ENABLED=1`, `ITSM_URL=<địa chỉ vừa in>`, `ITSM_PASSWORD=<ITSM_PASSWORD trong itsm/.env>`, rồi **Save**. Render tự deploy lại. `ITSM_USER` và `ITSM_WARNING_HOLD_SEC=30` đã có trong `render.yaml`; link NOC trong ticket lấy từ `RENDER_EXTERNAL_URL` do Render tự đặt.
-3. Mở bản Render: header hiện `iTop: sẵn sàng`. Bật một sự cố để thấy ticket.
+`./itsm/tunnel.sh` chọn đường hầm theo `itsm/.env`:
 
-Các lệnh khác: `./itsm/tunnel.sh url` (in lại địa chỉ), `./itsm/tunnel.sh down` (tắt đường hầm). Thử API qua đường hầm: `ITSM_URL=<địa chỉ> ./itsm/smoke-test.sh`.
+| | ngrok (khuyến nghị) | Cloudflare Quick Tunnel (dự phòng) |
+|---|---|---|
+| Khi nào dùng | Có `NGROK_AUTHTOKEN` trong `itsm/.env` | Không có token |
+| Tài khoản | Cần tài khoản ngrok miễn phí | Không cần |
+| Địa chỉ | **Cố định** (tên miền dev của tài khoản): dán vào Render một lần | Đổi mỗi lần bật lại: phải sửa `ITSM_URL` |
+| Lưu ý | Lần đầu mở iTop bằng trình duyệt có trang cảnh báo của ngrok (bấm qua, nhớ 7 ngày); gói free 1 GB/tháng | Dịch vụ thử nghiệm, có lúc không cấp được địa chỉ |
+
+Cài lần đầu:
+
+1. Đăng ký https://dashboard.ngrok.com/signup, lấy authtoken ở https://dashboard.ngrok.com/get-started/your-authtoken, thêm vào `itsm/.env`: `NGROK_AUTHTOKEN=...`. Token là bí mật: chỉ để trong `.env`.
+2. `./itsm/tunnel.sh`: cấu hình iTop chạy sau đường hầm, bật đường hầm, kiểm tra đường hầm trả lời, rồi in ra địa chỉ.
+3. Trên Render: **Dashboard → bms-demo → Environment**, đặt `ITSM_ENABLED=1`, `ITSM_URL=<địa chỉ vừa in>`, `ITSM_PASSWORD=<ITSM_PASSWORD trong itsm/.env>`, rồi **Save**. Render tự deploy lại. `ITSM_USER` và `ITSM_WARNING_HOLD_SEC=30` đã có trong `render.yaml`; link NOC trong ticket lấy từ `RENDER_EXTERNAL_URL` do Render tự đặt.
+4. Mở bản Render: header hiện `iTop: sẵn sàng`. Bật một sự cố để thấy ticket.
+
+Những lần sau chỉ cần `./itsm/tunnel.sh` (với ngrok không phải sửa gì trên Render). Các lệnh khác: `./itsm/tunnel.sh url` (in lại địa chỉ), `./itsm/tunnel.sh down` (tắt đường hầm). Thử API qua đường hầm: `ITSM_URL=<địa chỉ> ./itsm/smoke-test.sh`.
 
 Lưu ý:
 
-- **Địa chỉ đổi mỗi lần bật lại đường hầm**: phải sửa `ITSM_URL` trên Render. Muốn địa chỉ cố định cần Cloudflare Tunnel có tên (cần tên miền trên Cloudflare) hoặc dịch vụ đường hầm khác.
 - **Máy bạn phải bật** khi demo. iTop hoặc đường hầm tắt thì header báo `iTop: lỗi, đang thử lại`; ticket được tạo bù khi bật lại, trừ khi Render cho app ngủ trước đó (gói free không lưu `data/itsm-state.json`, hàng đợi mất theo).
-- **iTop được mở ra internet**: giữ mật khẩu admin mạnh. Cloudflare coi Quick Tunnel là công cụ thử nghiệm, không cam kết thời gian hoạt động.
-- iTop được cấu hình `app_root_url` trống và `behind_reverse_proxy = true` để tự dựng địa chỉ theo request. Cách này an toàn vì cổng iTop chỉ mở ở `127.0.0.1`.
+- **iTop được mở ra internet** trong lúc đường hầm chạy: giữ mật khẩu admin mạnh, tắt đường hầm khi không dùng.
+- iTop được cấu hình `app_root_url` trống và `behind_reverse_proxy = true` để tự dựng địa chỉ theo request; Apache trong image thêm `X-Forwarded-Port: 443` khi đường hầm không gửi (xem `itsm/apache-proxy.conf`). An toàn vì cổng iTop chỉ mở ở `127.0.0.1`.
+- Nếu iTop báo lỗi 500 sau khi dựng lại container (thiếu data model biên dịch), chạy `./itsm/install.sh`: script nhận ra và biên dịch lại, giữ nguyên dữ liệu.
 
 ### Kịch bản demo 5: từ cảnh báo đến ticket
 
