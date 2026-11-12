@@ -20,6 +20,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Đường hầm HTTPS miễn phí để bản demo trên Render gọi được iTop chạy ở máy này.
+  # Chỉ chạy khi gọi ./tunnel.sh (profile "tunnel"). Quick Tunnel: không cần tài khoản, địa chỉ đổi mỗi lần chạy.
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    command: ["tunnel", "--no-autoupdate", "--url", "http://itop:80"]
+    depends_on:
+      - itop
+    profiles: ["tunnel"]
+    restart: unless-stopped
+
   db:
     image: mariadb:11.4
     volumes:

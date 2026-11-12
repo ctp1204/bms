@@ -19,3 +19,15 @@ services:
         value: demo
       - key: BASIC_AUTH_PASSWORD
         sync: false # Render hỏi giá trị khi tạo Blueprint; không lưu mật khẩu trong repo
+      # ITSM (tùy chọn): iTop chạy ở máy riêng, mở ra qua đường hầm (itsm/tunnel.sh).
+      # Để trống ITSM_ENABLED hoặc ITSM_PASSWORD thì ITSM tắt, demo chạy như cũ.
+      - key: ITSM_ENABLED
+        sync: false # đặt 1 để bật
+      - key: ITSM_URL
+        sync: false # địa chỉ đường hầm do itsm/tunnel.sh in ra; đổi mỗi lần bật lại đường hầm
+      - key: ITSM_USER
+        value: bms-itsm
+      - key: ITSM_PASSWORD
+        sync: false
+      - key: ITSM_WARNING_HOLD_SEC
+        value: "30"

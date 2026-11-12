@@ -147,7 +147,8 @@ bms/
 │   ├── docker-compose.yml, Dockerfile
 │   ├── install.sh        # cài iTop tự động, không cần wizard
 │   ├── bootstrap.sh/.php # tổ chức, nhóm xử lý, tài khoản API
-│   ├── smoke-test.sh     # thử REST API
+│   ├── smoke-test.sh     # thử REST API (local hoặc qua đường hầm)
+│   ├── tunnel.sh         # mở iTop qua Cloudflare Quick Tunnel cho bản Render
 │   └── .env.example      # mẫu mật khẩu; .env thật không commit
 ├── test/                 # test bằng node:test
 ├── render.yaml           # cấu hình deploy Render (Blueprint)
@@ -295,7 +296,7 @@ Biến dùng được trong `message`: `{device}`, `{name}`, `{value}`, `{uom}`.
 | `ITSM_URL` | `http://127.0.0.1:8000/` | Địa chỉ iTop |
 | `ITSM_USER`, `ITSM_PASSWORD` | `bms-itsm`, (trống) | Tài khoản API tạo ticket. Thiếu mật khẩu thì ITSM tự tắt |
 | `ITSM_WARNING_HOLD_SEC` | `300` (trong `itsm.json`) | Cảnh báo mức warning phải kéo dài bao lâu mới tạo ticket. Demo: `30` |
-| `ITSM_NOC_URL` | `http://127.0.0.1:<PORT>/` | Link NOC ghi trong ticket |
+| `ITSM_NOC_URL` | `RENDER_EXTERNAL_URL` hoặc `http://127.0.0.1:<PORT>/` | Link NOC ghi trong ticket |
 | `ITSM_CMDB_USER`, `ITSM_CMDB_PASSWORD` | `bms-cmdb` | Tài khoản riêng cho `npm run itsm:cmdb` |
 
 Ví dụ chạy song song với một bản khác:
@@ -411,6 +412,27 @@ Trên dashboard, header có thêm trạng thái `iTop: đã kết nối` (hoặc
 
 Xóa sạch iTop để làm lại từ đầu: `cd itsm && docker compose down -v`, rồi xóa `data/itsm-state.json`.
 
+### Dùng ITSM với bản trên Render (miễn phí)
+
+Render free không chạy được iTop (cần MariaDB và ổ đĩa lưu dữ liệu, gói free không có). Cách miễn phí: **demo vẫn ở Render, iTop chạy ở máy bạn**, mở ra internet qua Cloudflare Quick Tunnel (không cần tài khoản, chạy bằng Docker).
+
+```
+Người xem ──► Demo trên Render ──REST──► https://….trycloudflare.com ──► iTop trên máy bạn
+```
+
+1. Trên máy có iTop: `./itsm/tunnel.sh`. Script cấu hình iTop chạy sau đường hầm, bật đường hầm, kiểm tra đường hầm trả lời, rồi in ra địa chỉ.
+2. Trên Render: **Dashboard → bms-demo → Environment**, đặt `ITSM_ENABLED=1`, `ITSM_URL=<địa chỉ vừa in>`, `ITSM_PASSWORD=<ITSM_PASSWORD trong itsm/.env>`, rồi **Save**. Render tự deploy lại. `ITSM_USER` và `ITSM_WARNING_HOLD_SEC=30` đã có trong `render.yaml`; link NOC trong ticket lấy từ `RENDER_EXTERNAL_URL` do Render tự đặt.
+3. Mở bản Render: header hiện `iTop: sẵn sàng`. Bật một sự cố để thấy ticket.
+
+Các lệnh khác: `./itsm/tunnel.sh url` (in lại địa chỉ), `./itsm/tunnel.sh down` (tắt đường hầm). Thử API qua đường hầm: `ITSM_URL=<địa chỉ> ./itsm/smoke-test.sh`.
+
+Lưu ý:
+
+- **Địa chỉ đổi mỗi lần bật lại đường hầm**: phải sửa `ITSM_URL` trên Render. Muốn địa chỉ cố định cần Cloudflare Tunnel có tên (cần tên miền trên Cloudflare) hoặc dịch vụ đường hầm khác.
+- **Máy bạn phải bật** khi demo. iTop hoặc đường hầm tắt thì header báo `iTop: lỗi, đang thử lại`; ticket được tạo bù khi bật lại, trừ khi Render cho app ngủ trước đó (gói free không lưu `data/itsm-state.json`, hàng đợi mất theo).
+- **iTop được mở ra internet**: giữ mật khẩu admin mạnh. Cloudflare coi Quick Tunnel là công cụ thử nghiệm, không cam kết thời gian hoạt động.
+- iTop được cấu hình `app_root_url` trống và `behind_reverse_proxy = true` để tự dựng địa chỉ theo request. Cách này an toàn vì cổng iTop chỉ mở ở `127.0.0.1`.
+
 ### Kịch bản demo 5: từ cảnh báo đến ticket
 
 Khoảng 6 phút. Tiếp nối kịch bản 3 và 4 trong tài liệu giải thích (xem cuối trang). Chuẩn bị: iTop đang chạy, `npm run start:itsm` (nên `SIM_SPEED=2`), mở dashboard ở tab **Điện** và iTop ở một tab khác. Header hiện `iTop: sẵn sàng`.
@@ -443,7 +465,7 @@ Kết thúc: tắt mọi sự cố, đóng các ticket trong iTop.
 | Gửi cảnh báo ra ngoài | Đã có ticket iTop (tùy chọn); chưa có email, Telegram |
 | SLA thật trong iTop | Hạn SLA mới ghi trong nội dung ticket; chưa cấu hình hợp đồng, dịch vụ, SLA/SLT trong iTop |
 | Lớp CI cho thiết bị làm mát | iTop không có sẵn; CRAH, chiller, dây rò rỉ tạm dùng `Peripheral`. Làm đúng cần viết extension iTop |
-| ITSM trên Render | Gói miễn phí không chạy được iTop + MariaDB; ITSM chỉ demo ở máy local |
+| ITSM trên Render | Gói miễn phí không chạy được iTop + MariaDB. Bản Render dùng iTop ở máy riêng qua đường hầm; máy đó phải bật khi demo |
 | Phân tích chất lượng điện, SOE, đo đếm tính tiền | Nên mua: cần đồng hồ đo chuyên dụng |
 | Báo cáo kWh theo khách hàng | Dữ liệu kWh đã có; chưa có báo cáo |
 | Máy chủ dự phòng, tách mạng OT/IT | Cần khi triển khai thật |
