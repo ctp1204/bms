@@ -12,18 +12,26 @@
     "downgradePriority": false
   },
 
+  "itop": {
+    "$comment": "Tên đối tượng trong iTop. itsm/bootstrap.php tạo chúng; bộ nối dùng để tìm lại.",
+    "organization": "DXAI Data Center",
+    "deliveryModel": "DC Operations",
+    "callerFirstName": "BMS-EPMS",
+    "callerLastName": "Monitor"
+  },
+
   "teams": {
-    "power": { "vi": "Điện", "ja": "電源" },
-    "cooling": { "vi": "Làm mát", "ja": "空調" },
-    "ot": { "vi": "Giám sát (OT)", "ja": "監視（OT）" }
+    "power": { "vi": "Điện", "ja": "電源", "itop": "DC Power" },
+    "cooling": { "vi": "Làm mát", "ja": "空調", "itop": "DC Cooling" },
+    "ot": { "vi": "Giám sát (OT)", "ja": "監視（OT）", "itop": "DC OT Monitoring" }
   },
 
   "priorities": {
-    "$comment": "SLA tạm dùng cho demo: ttoMin = thời gian phản hồi, ttrMin = thời gian xử lý (phút).",
-    "P1": { "name": { "vi": "Khẩn cấp", "ja": "緊急" }, "ttoMin": 15, "ttrMin": 240 },
-    "P2": { "name": { "vi": "Cao", "ja": "高" }, "ttoMin": 30, "ttrMin": 480 },
-    "P3": { "name": { "vi": "Trung bình", "ja": "中" }, "ttoMin": 240, "ttrMin": 1440 },
-    "P4": { "name": { "vi": "Thấp", "ja": "低" }, "ttoMin": 1440, "ttrMin": 7200 }
+    "$comment": "SLA tạm dùng cho demo: ttoMin = thời gian phản hồi, ttrMin = thời gian xử lý (phút). Trong iTop, ưu tiên = ma trận impact × urgency; với impact 2 (A service) thì ưu tiên bằng đúng urgency.",
+    "P1": { "name": { "vi": "Khẩn cấp", "ja": "緊急" }, "itop": { "impact": 2, "urgency": 1 }, "ttoMin": 15, "ttrMin": 240 },
+    "P2": { "name": { "vi": "Cao", "ja": "高" }, "itop": { "impact": 2, "urgency": 2 }, "ttoMin": 30, "ttrMin": 480 },
+    "P3": { "name": { "vi": "Trung bình", "ja": "中" }, "itop": { "impact": 2, "urgency": 3 }, "ttoMin": 240, "ttrMin": 1440 },
+    "P4": { "name": { "vi": "Thấp", "ja": "低" }, "itop": { "impact": 2, "urgency": 4 }, "ttoMin": 1440, "ttrMin": 7200 }
   },
 
   "groups": [

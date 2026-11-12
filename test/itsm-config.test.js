@@ -37,6 +37,14 @@ test('groups reference known teams, priorities and scopes; names are bilingual',
   for (const t of Object.values(itsm.teams)) assert.ok(t.vi && t.ja);
 });
 
+test('every priority maps to iTop impact 2 + matching urgency, every team has an iTop name', () => {
+  // iTop 3.2: với impact 2 (A service), priority tính ra bằng đúng urgency (xem itsm/smoke-test.sh)
+  for (const p of priorities) assert.deepEqual(itsm.priorities[p].itop, { impact: 2, urgency: Number(p.slice(1)) });
+  const names = Object.values(itsm.teams).map(t => t.itop);
+  assert.ok(names.every(Boolean) && new Set(names).size === names.length, 'team iTop names must be set and unique');
+  assert.ok(itsm.itop.organization && itsm.itop.deliveryModel && itsm.itop.callerLastName);
+});
+
 test('SLA: higher priority means shorter response and resolution time', () => {
   const sla = priorities.sort().map(p => itsm.priorities[p]);
   for (let i = 1; i < sla.length; i++) {
