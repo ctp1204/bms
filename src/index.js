@@ -10,6 +10,8 @@ const { AlarmEngine } = require('./alarms');
 const { History } = require('./history');
 const { LANGS } = require('./locale');
 const { checkBasicAuth } = require('./auth');
+const { ItopClient } = require('./itop');
+const { ItsmConnector } = require('./itsm');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -53,11 +55,37 @@ alarms.on('event', e => {
   if (recentEvents.length > 500) recentEvents.shift();
 });
 
+// ITSM (tùy chọn): cảnh báo → ticket iTop. Chỉ bật khi ITSM_ENABLED=1; không đặt thì demo chạy như cũ.
+let itsm = null;
+if (process.env.ITSM_ENABLED === '1') {
+  const itsmUrl = process.env.ITSM_URL || `http://127.0.0.1:${process.env.ITOP_PORT || 8000}/`;
+  if (!process.env.ITSM_PASSWORD) {
+    console.error('[itsm] ITSM_ENABLED=1 nhưng thiếu ITSM_PASSWORD: ITSM bị tắt.');
+  } else {
+    const holdSec = process.env.ITSM_WARNING_HOLD_SEC;
+    itsm = new ItsmConnector({
+      client: new ItopClient({ url: itsmUrl, user: process.env.ITSM_USER || 'bms-itsm', password: process.env.ITSM_PASSWORD }),
+      config: JSON.parse(fs.readFileSync(path.join(ROOT, 'config/itsm.json'), 'utf8')),
+      devices: cfg.devices,
+      statePath: path.join(DATA, 'itsm-state.json'),
+      holdSec: holdSec === undefined || holdSec === '' ? undefined : Number(holdSec),
+      nocUrl: process.env.ITSM_NOC_URL || `http://127.0.0.1:${PORT}/`,
+      itopUrl: itsmUrl,
+      log: m => console.log(`[itsm] ${m}`),
+    });
+    // Lỗi trong bộ nối không được làm hỏng bộ cảnh báo
+    alarms.on('event', e => {
+      try { itsm.handle(e); } catch (err) { console.error(`[itsm] ${err.message}`); }
+    });
+  }
+}
+
 let last = null;
 const sseClients = new Set();
 collector.on('snapshot', snap => {
   history.push(snap.ts, snap.values);
   alarms.evaluate(snap);
+  if (itsm) itsm.tick(snap.ts);
   last = { ...snap, alarms: alarms.list() };
   const msg = `data: ${JSON.stringify(last)}\n\n`;
   for (const res of sseClients) res.write(msg);
@@ -138,6 +166,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { point, meta: pointMeta[point], rows: history.query(point, Date.now() - minutes * 60000) });
     }
     if (req.method === 'GET' && p === '/api/alarms') return json(res, 200, alarms.list());
+    if (req.method === 'GET' && p === '/api/itsm') return json(res, 200, itsm ? itsm.snapshot() : { enabled: false });
     if (req.method === 'GET' && p === '/api/events') {
       const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 500);
       return json(res, 200, recentEvents.slice(-limit).reverse());
@@ -179,5 +208,6 @@ server.listen(PORT, HOST, () => {
   console.log(`[bms] Polling Modbus ${cfg.modbus.host}:${cfg.modbus.port} every ${cfg.pollIntervalMs} ms (read-only)`);
   if (SIM_PROXY) console.log(`[bms] Demo mode: /sim/api/faults -> simulator ${SIM_HOST}:${SIM_CONTROL_PORT}`);
   console.log(`[bms] Basic auth: ${AUTH_PASSWORD ? `on (user "${AUTH_USER}")` : 'off'}`);
+  console.log(`[bms] ITSM: ${itsm ? `on -> ${itsm.itopUrl} (warning hold ${itsm.holdMs / 1000} s)` : 'off'}`);
   collector.start();
 });
