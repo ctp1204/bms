@@ -16,6 +16,7 @@ const CLOSED = new Set(['resolved', 'closed']);
 const RETRY_MIN_MS = 2000;
 const RETRY_MAX_MS = 60000;
 const TITLE_MAX = 200;
+const SKIPPED = Symbol('skipped');
 const VIEW_BY_TEAM = { power: 'power', cooling: 'cooling' };
 
 // Thử lại khi lỗi đường truyền, iTop quá tải, hoặc sai đăng nhập (sửa .env rồi khởi động lại là gửi tiếp).
@@ -260,8 +261,19 @@ class ItsmConnector extends EventEmitter {
     this._pump();
   }
 
+  // Một vòng gửi tại một thời điểm. Lệnh xếp hàng trong lúc vòng đang chạy (kể cả lúc vòng vừa xong
+  // nhưng chưa kịp kết thúc) sẽ được gửi ở vòng kế tiếp ngay sau đó, không phải chờ tới lượt tick sau.
   _pump() {
-    if (!this._pumping) this._pumping = this._drain().finally(() => { this._pumping = null; });
+    if (this._pumping) {
+      this._again = true;
+      return this._pumping;
+    }
+    this._pumping = (async () => {
+      do {
+        this._again = false;
+        await this._drain();
+      } while (this._again && this.outbox.length && this.clock() >= this.nextAttemptAt);
+    })().finally(() => { this._pumping = null; });
     return this._pumping;
   }
 
@@ -269,10 +281,13 @@ class ItsmConnector extends EventEmitter {
     while (this.outbox.length && this.clock() >= this.nextAttemptAt) {
       const job = this.outbox[0];
       try {
-        await this._run(job);
+        const sent = await this._run(job);
         this.outbox.shift();
-        this.retryMs = RETRY_MIN_MS;
-        this.health = { state: 'ok', lastError: null, lastOkAt: this.clock() };
+        // Lệnh bị bỏ qua mà không gọi iTop không chứng minh được iTop ổn: giữ nguyên trạng thái lỗi trước đó.
+        if (sent !== SKIPPED) {
+          this.retryMs = RETRY_MIN_MS;
+          this.health = { state: 'ok', lastError: null, lastOkAt: this.clock() };
+        }
       } catch (e) {
         if (retryable(e)) {
           this.nextAttemptAt = this.clock() + this.retryMs;
@@ -294,15 +309,15 @@ class ItsmConnector extends EventEmitter {
 
   async _run(job) {
     const g = this.groups[job.groupKey];
-    if (!g) return;
+    if (!g) return SKIPPED;
     if (job.op === 'open') return this._create(g, job);
-    if (!g.ticket) return; // ticket của nhóm không tạo được: bỏ ghi chú
+    if (!g.ticket) return SKIPPED; // ticket của nhóm không tạo được: bỏ ghi chú
     if (job.kind === 'raised') {
       // Người trực đã đóng ticket trong lúc cảnh báo phát sinh lại: mở ticket mới, ghi tham chiếu ticket cũ.
       const [cur] = await this.client.get('Incident', g.ticket.key, 'status');
       if (cur && CLOSED.has(cur.fields.status)) {
         const list = Object.values(g.active).sort((x, y) => x.raisedAt - y.raisedAt);
-        if (!list.length) return; // cảnh báo đã hết trước khi kịp gửi: không cần ticket mới
+        if (!list.length) return undefined; // cảnh báo đã hết trước khi kịp gửi: không cần ticket mới (đã gọi iTop)
         g.prevRef = g.ticket.ref;
         g.cis = [];
         for (const x of list) this._addCi(g, x.deviceId);

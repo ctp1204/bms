@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { ItsmConnector } = require('../src/itsm');
+const { ItsmConnector, retryable } = require('../src/itsm');
 const { ItopError } = require('../src/itop');
 
 const { devices } = require(path.join(__dirname, '../config/devices.json'));
@@ -230,4 +230,90 @@ test('restart: state is reloaded and re-raised alarms attach to the existing tic
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('regression: a job queued right after the queue went idle is still sent', async () => {
+  const { conn, client } = make();
+  conn.tick(s(0)); // vòng gửi rỗng vừa xong nhưng chưa kết thúc
+  conn.handle(ev('utility_lost', s(0)));
+  await conn.flush();
+  assert.equal(client.creates.length, 1);
+});
+
+test('rejected open: job dropped, health shows the error, the next alarm in the group tries again', async () => {
+  const { conn, client } = make();
+  client.fail.push(new ItopError('bad field', 100), new ItopError('bad field', 100)); // lần gắn CI và lần không CI
+  conn.handle(ev('utility_lost', s(0)));
+  conn.handle(ev('ups_battery', s(1))); // ghi chú cho ticket không tạo được: bị bỏ, không chặn hàng đợi
+  await conn.flush();
+  assert.equal(client.creates.length, 0);
+  assert.deepEqual([conn.snapshot().state, conn.snapshot().queue, conn.snapshot().lastError], ['error', 0, 'bad field']);
+
+  conn.handle(ev('crah_stopped', s(5)));
+  await conn.flush();
+  assert.equal(client.creates.length, 1, 'group is not stuck after a failed open');
+});
+
+test('a rejected note is dropped without blocking later notes', async () => {
+  const { conn, client } = make();
+  conn.handle(ev('utility_lost', s(0)));
+  await conn.flush();
+  client.fail.push(new ItopError('closed ticket is read-only', 100));
+  conn.handle({ ...ev('utility_lost', s(5)), type: 'acked' });
+  conn.handle({ ...ev('utility_lost', s(6)), type: 'cleared' });
+  await conn.flush();
+  assert.equal(conn.snapshot().queue, 0);
+  assert.ok(client.updates.some(u => /Đã hết/.test(logs(u))));
+});
+
+test('only transport, overload and login errors are retried', () => {
+  const cases = [
+    [new ItopError('x', 'NETWORK'), true], [new ItopError('x', 'TIMEOUT'), true], [new ItopError('x', 'HTTP_503'), true],
+    [new ItopError('x', 1), true], [new ItopError('x', 'HTTP_404'), false], [new ItopError('x', 100), false],
+    [new ItopError('x', 12), false], [new Error('socket hang up'), true],
+  ];
+  for (const [e, want] of cases) assert.equal(retryable(e), want, `${e.code}`);
+});
+
+test('back-off doubles from 2 s and stops growing at 60 s', async () => {
+  const { conn, client, setNow } = make();
+  for (let i = 0; i < 7; i++) client.fail.push(new ItopError('down', 'NETWORK'));
+  conn.handle(ev('utility_lost', s(0))); // lần gửi đầu tiên chạy ngay và gặp lỗi thứ nhất
+  await conn.flush();
+  const waits = [];
+  let now = s(0);
+  for (let i = 0; i < 7; i++) {
+    waits.push((conn.nextAttemptAt - now) / 1000);
+    now = conn.nextAttemptAt;
+    setNow(now); conn.tick(now); await conn.flush();
+  }
+  assert.deepEqual(waits, [2, 4, 8, 16, 32, 60, 60]);
+  setNow(now); conn.tick(now); await conn.flush();
+  assert.equal(client.creates.length, 1);
+});
+
+test('corrupt state file: start fresh instead of crashing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'itsm-'));
+  const statePath = path.join(dir, 'itsm-state.json');
+  try {
+    fs.writeFileSync(statePath, '{oops');
+    const { conn, client } = make({ statePath });
+    conn.handle(ev('utility_lost', s(0)));
+    await conn.flush();
+    assert.equal(client.creates.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(statePath, 'utf8')).version, 1, 'state file rewritten');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a flapping alarm stays on one ticket', async () => {
+  const { conn, client } = make();
+  for (let i = 0; i < 5; i++) {
+    conn.handle(ev('pdu_input_lost', s(i * 60), { device: 'pdua' }));
+    conn.handle({ ...ev('pdu_input_lost', s(i * 60 + 20), { device: 'pdua' }), type: 'cleared' });
+  }
+  await conn.flush();
+  assert.equal(client.creates.length, 1);
+  assert.equal(client.updates.filter(u => /Phát sinh thêm/.test(logs(u))).length, 4);
 });
