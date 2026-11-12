@@ -31,7 +31,12 @@ class ItopClient {
     return new Promise((resolve, reject) => {
       const req = lib.request(this.endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(body),
+          // iTop sau đường hầm ngrok miễn phí: bỏ qua trang cảnh báo dành cho trình duyệt. Vô hại với nơi khác.
+          'ngrok-skip-browser-warning': '1',
+        },
         timeout: this.timeoutMs,
       }, res => {
         let data = '';

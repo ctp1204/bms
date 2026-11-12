@@ -9,7 +9,7 @@ BASE="${ITSM_URL:-http://127.0.0.1:${ITOP_PORT:-8000}/}"
 URL="${BASE%/}/webservices/rest.php?version=1.3"
 
 call() { # $1 = json_data
-  curl -sf -X POST "$URL" --data-urlencode "auth_user=${ITSM_USER:-bms-itsm}" \
+  curl -sf -X POST "$URL" -H 'ngrok-skip-browser-warning: 1' --data-urlencode "auth_user=${ITSM_USER:-bms-itsm}" \
     --data-urlencode "auth_pwd=$ITSM_PASSWORD" --data-urlencode "json_data=$1"
 }
 check() { # $1 = phản hồi, $2 = biểu thức Python trên biến r, $3 = mô tả

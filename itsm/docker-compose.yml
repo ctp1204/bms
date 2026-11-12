@@ -12,23 +12,38 @@ services:
     volumes:
       - itop-conf:/var/www/html/conf
       - itop-data:/var/www/html/data
+      # Data model đã biên dịch. Không có volume này thì dựng lại container là iTop lỗi 500 (install.sh sẽ biên dịch lại).
+      - itop-env:/var/www/html/env-production
     post_start:
-      - command: chown -R www-data:www-data /var/www/html/conf /var/www/html/data
+      - command: chown -R www-data:www-data /var/www/html/conf /var/www/html/data /var/www/html/env-production
         user: root
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
 
-  # Đường hầm HTTPS miễn phí để bản demo trên Render gọi được iTop chạy ở máy này.
-  # Chỉ chạy khi gọi ./tunnel.sh (profile "tunnel"). Quick Tunnel: không cần tài khoản, địa chỉ đổi mỗi lần chạy.
+  # Đường hầm HTTPS để bản demo trên Render gọi được iTop chạy ở máy này. Chỉ chạy khi gọi ./tunnel.sh.
+  # ngrok (mặc định khi có NGROK_AUTHTOKEN): tài khoản miễn phí được một tên miền dev cố định.
+  ngrok:
+    image: ngrok/ngrok:3.39.13-alpine
+    command: ["http", "itop:80", "--log", "stdout", "--log-format", "logfmt"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    depends_on:
+      - itop
+    profiles: ["ngrok"]
+    restart: "no"
+
+  # Cloudflare Quick Tunnel (dự phòng khi không có NGROK_AUTHTOKEN): không cần tài khoản, địa chỉ đổi mỗi lần chạy.
   tunnel:
     image: cloudflare/cloudflared:2026.9.3
     command: ["tunnel", "--no-autoupdate", "--url", "http://itop:80"]
     depends_on:
       - itop
     profiles: ["tunnel"]
-    restart: unless-stopped
+    # Không tự khởi động lại: xin địa chỉ thất bại mà lặp lại liên tục sẽ bị Cloudflare chặn (HTTP 429).
+    # Khi đã có địa chỉ, cloudflared tự kết nối lại nếu mạng chập chờn.
+    restart: "no"
 
   db:
     image: mariadb:11.4
@@ -49,4 +64,5 @@ services:
 volumes:
   itop-conf:
   itop-data:
+  itop-env:
   db-data:
