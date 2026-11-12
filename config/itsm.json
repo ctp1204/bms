@@ -20,6 +20,35 @@
     "callerLastName": "Monitor"
   },
 
+  "cmdb": {
+    "$comment": "Ánh xạ thiết bị trong devices.json sang CI trong iTop. Khóa liên kết là asset_number = assetPrefix + id thiết bị. rack_sensor ánh xạ thành Rack vì cảnh báo nhiệt nói về rack. PDU sàn dùng PowerSource vì lớp PDU của iTop bắt buộc nằm trong một rack. iTop không có lớp thiết bị làm mát nên tạm dùng Peripheral.",
+    "location": "Phòng máy 1",
+    "assetPrefix": "bms:",
+    "status": "production",
+    "classByType": {
+      "crah": "Peripheral",
+      "chiller": "Peripheral",
+      "leak": "Peripheral",
+      "rack_sensor": "Rack",
+      "power_meter": "PowerSource",
+      "ups": "PowerSource",
+      "generator": "PowerSource",
+      "ats": "PowerSource",
+      "pdu": "PowerSource"
+    },
+    "criticalityByType": {
+      "crah": "high",
+      "chiller": "high",
+      "leak": "medium",
+      "rack_sensor": "high",
+      "power_meter": "high",
+      "ups": "high",
+      "generator": "high",
+      "ats": "high",
+      "pdu": "high"
+    }
+  },
+
   "teams": {
     "power": { "vi": "Điện", "ja": "電源", "itop": "DC Power" },
     "cooling": { "vi": "Làm mát", "ja": "空調", "itop": "DC Cooling" },

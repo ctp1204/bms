@@ -57,32 +57,43 @@ foreach ($aCfg['teams'] as $sKey => $aTeam) {
 }
 
 $oCaller = ensure('Person', ['name' => $aItop['callerLastName'], 'first_name' => $aItop['callerFirstName'], 'org_id' => $iOrg]);
+ensure('Location', ['name' => $aCfg['cmdb']['location'], 'org_id' => $iOrg], ['status' => 'active']);
 
-// Tài khoản API: quyền tối thiểu để tạo và cập nhật ticket qua REST.
-$aProfiles = ['REST Services User', 'Service Desk Agent', 'Support Agent'];
-$oUser = find('UserLocal', ['login' => $sLogin]);
-$bNew = !$oUser;
-if ($bNew) {
-	$oUser = MetaModel::NewObject('UserLocal');
-	$oUser->Set('login', $sLogin);
-	$oUser->Set('contactid', $oCaller->GetKey());
-	$oUser->Set('language', 'EN US');
+// Tài khoản API: mỗi tích hợp một tài khoản, chỉ có quyền tối thiểu cho việc của nó.
+function ensureUser(string $sLogin, string $sPwd, int $iContact, array $aProfiles, string $sReason): void
+{
+	$oUser = find('UserLocal', ['login' => $sLogin]);
+	$bNew = !$oUser;
+	if ($bNew) {
+		$oUser = MetaModel::NewObject('UserLocal');
+		$oUser->Set('login', $sLogin);
+		$oUser->Set('contactid', $iContact);
+		$oUser->Set('language', 'EN US');
+	}
+	$oUser->Set('password', $sPwd); // luôn đồng bộ với itsm/.env
+	$oLinks = $oUser->Get('profile_list');
+	$aHave = [];
+	$oLinks->Rewind();
+	while ($oLnk = $oLinks->Fetch()) $aHave[] = $oLnk->Get('profile');
+	foreach ($aProfiles as $sProfile) {
+		if (in_array($sProfile, $aHave, true)) continue;
+		$oProfile = find('URP_Profiles', ['name' => $sProfile]);
+		if (!$oProfile) throw new Exception("Không thấy profile '$sProfile'");
+		$oLnk = MetaModel::NewObject('URP_UserProfile');
+		$oLnk->Set('profileid', $oProfile->GetKey());
+		$oLnk->Set('reason', $sReason);
+		$oLinks->AddItem($oLnk);
+	}
+	$oUser->Set('profile_list', $oLinks);
+	$bNew ? $oUser->DBInsert() : $oUser->DBUpdate();
+	echo ($bNew ? '  đã tạo   ' : '  cập nhật ')."UserLocal: $sLogin (".implode(', ', $aProfiles).")\n";
 }
-$oUser->Set('password', $sPwd); // luôn đồng bộ với itsm/.env
-$oLinks = $oUser->Get('profile_list');
-$aHave = [];
-$oLinks->Rewind();
-while ($oLnk = $oLinks->Fetch()) $aHave[] = $oLnk->Get('profile');
-foreach ($aProfiles as $sProfile) {
-	if (in_array($sProfile, $aHave, true)) continue;
-	$oProfile = find('URP_Profiles', ['name' => $sProfile]);
-	if (!$oProfile) throw new Exception("Không thấy profile '$sProfile'");
-	$oLnk = MetaModel::NewObject('URP_UserProfile');
-	$oLnk->Set('profileid', $oProfile->GetKey());
-	$oLnk->Set('reason', 'bms-itsm connector');
-	$oLinks->AddItem($oLnk);
+
+// Tạo và cập nhật ticket
+ensureUser($sLogin, $sPwd, $oCaller->GetKey(), ['REST Services User', 'Service Desk Agent', 'Support Agent'], 'bms-itsm connector');
+// Đồng bộ CMDB: chỉ quản lý CI, không đụng tới ticket
+$sCmdbPwd = getenv('ITSM_CMDB_PASSWORD');
+if ($sCmdbPwd) {
+	ensureUser(getenv('ITSM_CMDB_USER') ?: 'bms-cmdb', $sCmdbPwd, $oCaller->GetKey(), ['REST Services User', 'Configuration Manager'], 'bms-itsm CMDB sync');
 }
-$oUser->Set('profile_list', $oLinks);
-$bNew ? $oUser->DBInsert() : $oUser->DBUpdate();
-echo ($bNew ? '  đã tạo   ' : '  cập nhật ')."UserLocal: $sLogin (".implode(', ', $aProfiles).")\n";
 echo "Xong.\n";
