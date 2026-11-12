@@ -17,7 +17,12 @@
     "organization": "DXAI Data Center",
     "deliveryModel": "DC Operations",
     "callerFirstName": "BMS-EPMS",
-    "callerLastName": "Monitor"
+    "callerLastName": "Monitor",
+    "$comment2": "Để người trực xử lý được ticket: Assign cần người trong nhóm; Mark as resolved cần một Service đã có hợp đồng với tổ chức. Danh mục con của Service lấy theo tên tiếng Việt của từng nhóm xử lý.",
+    "service": "Hạ tầng trung tâm dữ liệu",
+    "contract": "Hợp đồng vận hành DC",
+    "operatorFirstName": "NOC",
+    "operatorLastName": "Operator"
   },
 
   "cmdb": {

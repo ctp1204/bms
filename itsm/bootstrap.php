@@ -49,12 +49,37 @@ if ((int)$oOrg->Get('deliverymodel_id') !== (int)$oDm->GetKey()) {
 	echo "  gắn      DeliveryModel vào Organization\n";
 }
 
+$aTeams = [];
 foreach ($aCfg['teams'] as $sKey => $aTeam) {
 	if ($sKey[0] === '$') continue;
 	$oTeam = ensure('Team', ['name' => $aTeam['itop'], 'org_id' => $iOrg]);
 	// Nhóm phải nằm trong delivery model thì mới gán ticket cho nhóm được
 	ensure('lnkDeliveryModelToContact', ['deliverymodel_id' => $oDm->GetKey(), 'contact_id' => $oTeam->GetKey()]);
+	$aTeams[] = [$oTeam, $aTeam['vi']];
 }
+
+// Để người trực xử lý được ticket trong iTop:
+// - Assign bắt buộc chọn người trong nhóm: dùng người liên hệ của tài khoản admin, đổi tên thành NOC Operator
+//   (trình cài iTop tạo sẵn với tên "My first name My last name"), cho vào cả 3 nhóm.
+$oAdmin = find('UserLocal', ['login' => 'admin']);
+if ($oAdmin && $oAdmin->Get('contactid')) {
+	$oOp = MetaModel::GetObject('Person', $oAdmin->Get('contactid'));
+	if ($oOp->Get('name') !== $aItop['operatorLastName'] || $oOp->Get('first_name') !== $aItop['operatorFirstName']) {
+		$oOp->Set('first_name', $aItop['operatorFirstName']);
+		$oOp->Set('name', $aItop['operatorLastName']);
+		$oOp->Set('org_id', $iOrg);
+		$oOp->DBUpdate();
+		echo "  cập nhật Person: ".$oOp->GetName()." (người liên hệ của admin)\n";
+	}
+	foreach ($aTeams as [$oTeam]) ensure('lnkPersonToTeam', ['team_id' => $oTeam->GetKey(), 'person_id' => $oOp->GetKey()]);
+}
+// - Mark as resolved bắt buộc chọn Service, và iTop chỉ cho chọn Service có hợp đồng với tổ chức của ticket.
+$oService = ensure('Service', ['name' => $aItop['service'], 'org_id' => $iOrg], ['status' => 'production']);
+foreach ($aTeams as [, $sName]) {
+	ensure('ServiceSubcategory', ['name' => $sName, 'service_id' => $oService->GetKey()], ['request_type' => 'incident', 'status' => 'production']);
+}
+$oContract = ensure('CustomerContract', ['name' => $aItop['contract'], 'org_id' => $iOrg], ['provider_id' => $iOrg, 'status' => 'production']);
+ensure('lnkCustomerContractToService', ['customercontract_id' => $oContract->GetKey(), 'service_id' => $oService->GetKey()]);
 
 $oCaller = ensure('Person', ['name' => $aItop['callerLastName'], 'first_name' => $aItop['callerFirstName'], 'org_id' => $iOrg]);
 ensure('Location', ['name' => $aCfg['cmdb']['location'], 'org_id' => $iOrg], ['status' => 'active']);
