@@ -62,6 +62,8 @@ function fakeNetbox({ token = TOKEN, failOn } = {}) {
           Object.assign(ea, { cable: { id: o.id }, link_peers_type: b.object_type, link_peers: [{ id: b.object_id }] });
           Object.assign(eb, { cable: { id: o.id }, link_peers_type: a.object_type, link_peers: [{ id: a.object_id }] });
         }
+        // NetBox lọc power feed theo site qua tủ phân phối của nó
+        if (ep === 'dcim/power-feeds/') o.site = (db.store['dcim/power-panels/'].find(pl => pl.id === fields.power_panel) || {}).site;
         list.push(o);
         if (ep === 'dcim/devices/') {
           const comp = (tplEp, outEp, extra) => (db.store[tplEp] || []).filter(t => t.device_type.id === fields.device_type)

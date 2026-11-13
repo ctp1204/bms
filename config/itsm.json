@@ -51,7 +51,10 @@
       "generator": "high",
       "ats": "high",
       "pdu": "high"
-    }
+    },
+    "$comment2": "Máy chủ lấy từ hồ sơ DCIM (NetBox là nguồn gốc; không có NetBox thì config/dcim.json). Khóa asset_number = assetPrefix + tên máy trong NetBox; gắn vào Rack của nó.",
+    "serverClass": "Server",
+    "serverCriticality": "high"
   },
 
   "teams": {

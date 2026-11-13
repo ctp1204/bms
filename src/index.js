@@ -14,6 +14,7 @@ const { ItopClient } = require('./itop');
 const { ItsmConnector } = require('./itsm');
 const { NetboxClient } = require('./netbox');
 const { DcimInventory, computeCapacity, planPlacement } = require('./dcim-capacity');
+const { powerImpact, impactLines } = require('./dcim-impact');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -57,6 +58,40 @@ alarms.on('event', e => {
   if (recentEvents.length > 500) recentEvents.shift();
 });
 
+// DCIM: dung lượng rack/PDU. Hồ sơ đọc từ NetBox khi có token (DCIM_API_KEY, DCIM_API_TOKEN, vd. qua
+// `npm run start:dcim`), làm mới mỗi phút; không có NetBox (vd. trên Render) thì dùng config/dcim.json.
+// DCIM_SOURCE=config: bỏ qua NetBox dù có token.
+const dcimCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/dcim.json'), 'utf8'));
+const useNetbox = process.env.DCIM_SOURCE !== 'config' && process.env.DCIM_API_KEY && process.env.DCIM_API_TOKEN;
+const netboxUrl = process.env.NETBOX_URL || (process.env.NETBOX_PORT ? `http://127.0.0.1:${process.env.NETBOX_PORT}/` : dcimCfg.netbox.url);
+const dcimInventory = new DcimInventory({
+  client: useNetbox ? new NetboxClient({ url: netboxUrl, token: `nbt_${process.env.DCIM_API_KEY}.${process.env.DCIM_API_TOKEN}`, timeoutMs: 8000 }) : null,
+  dcim: dcimCfg,
+  devices: cfg.devices,
+  log: m => console.log(`[dcim] ${m}`),
+});
+const dcimCapacity = () => {
+  const inventory = dcimInventory.get();
+  return { ...computeCapacity({ inventory, dcim: dcimCfg, rules, values: last ? last.values : {}, ts: last ? last.ts : null }),
+    sourceName: inventory.sourceName, sourceError: inventory.error, netboxUrl: useNetbox ? netboxUrl : null };
+};
+
+// Mất PDU sàn (pdu_input_lost): liệt kê máy chủ mất điện / chỉ còn một nguồn theo đường cấp điện trong DCIM,
+// ghi vào ticket iTop và gắn các máy chủ đó làm CI (CMDB iTop nhận máy chủ từ NetBox qua npm run itsm:cmdb).
+const IMPACT_RULES = new Set(['pdu_input_lost']);
+const dcimImpact = pdu => {
+  const inventory = dcimInventory.get();
+  const impact = powerImpact(inventory, dcimCfg, pdu);
+  return impact && { ...impact, sourceName: inventory.sourceName };
+};
+const itsmImpact = a => {
+  if (!IMPACT_RULES.has(a.ruleId)) return null;
+  const imp = dcimImpact(a.deviceId);
+  if (!imp) return null;
+  return { vi: impactLines(imp, 'vi', imp.sourceName), ja: impactLines(imp, 'ja', imp.sourceName),
+    cis: [...imp.unpowered, ...imp.singleSourced].map(x => x.name) };
+};
+
 // ITSM (tùy chọn): cảnh báo → ticket iTop. Chỉ bật khi ITSM_ENABLED=1; không đặt thì demo chạy như cũ.
 let itsm = null;
 if (process.env.ITSM_ENABLED === '1') {
@@ -75,6 +110,7 @@ if (process.env.ITSM_ENABLED === '1') {
       nocUrl: process.env.ITSM_NOC_URL || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/` : `http://127.0.0.1:${PORT}/`),
       itopUrl: itsmUrl,
       log: m => console.log(`[itsm] ${m}`),
+      impact: itsmImpact,
     });
     // Lỗi trong bộ nối không được làm hỏng bộ cảnh báo
     alarms.on('event', e => {
@@ -82,24 +118,6 @@ if (process.env.ITSM_ENABLED === '1') {
     });
   }
 }
-
-// DCIM: dung lượng rack/PDU. Hồ sơ đọc từ NetBox khi có token (DCIM_API_KEY, DCIM_API_TOKEN, vd. qua
-// `npm run start:dcim`), làm mới mỗi phút; không có NetBox (vd. trên Render) thì dùng config/dcim.json.
-// DCIM_SOURCE=config: bỏ qua NetBox dù có token.
-const dcimCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/dcim.json'), 'utf8'));
-const useNetbox = process.env.DCIM_SOURCE !== 'config' && process.env.DCIM_API_KEY && process.env.DCIM_API_TOKEN;
-const netboxUrl = process.env.NETBOX_URL || (process.env.NETBOX_PORT ? `http://127.0.0.1:${process.env.NETBOX_PORT}/` : dcimCfg.netbox.url);
-const dcimInventory = new DcimInventory({
-  client: useNetbox ? new NetboxClient({ url: netboxUrl, token: `nbt_${process.env.DCIM_API_KEY}.${process.env.DCIM_API_TOKEN}`, timeoutMs: 8000 }) : null,
-  dcim: dcimCfg,
-  devices: cfg.devices,
-  log: m => console.log(`[dcim] ${m}`),
-});
-const dcimCapacity = () => {
-  const inventory = dcimInventory.get();
-  return { ...computeCapacity({ inventory, dcim: dcimCfg, rules, values: last ? last.values : {}, ts: last ? last.ts : null }),
-    sourceName: inventory.sourceName, sourceError: inventory.error, netboxUrl: useNetbox ? netboxUrl : null };
-};
 
 let last = null;
 const sseClients = new Set();
@@ -195,6 +213,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/alarms') return json(res, 200, alarms.list());
     if (req.method === 'GET' && p === '/api/itsm') return json(res, 200, itsm ? itsm.snapshot() : { enabled: false });
     if (req.method === 'GET' && p === '/api/dcim/capacity') return json(res, 200, dcimCapacity());
+    if (req.method === 'GET' && p === '/api/dcim/impact') {
+      const imp = dcimImpact(url.searchParams.get('pdu') || 'pdua');
+      return imp ? json(res, 200, imp) : json(res, 400, { error: 'Unknown PDU' });
+    }
     if (req.method === 'GET' && p === '/api/dcim/plan') {
       // ?type=gpu8&count=2 (loại trong config/dcim.json) hoặc ?u=8&kw=10.2&count=2
       const t = dcimCfg.deviceTypes[url.searchParams.get('type')];

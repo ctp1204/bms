@@ -32,7 +32,7 @@ test('inventory read back from NetBox equals the config it was synced from', asy
   await withNetbox({}, async url => {
     const client = new NetboxClient({ url, token: TOKEN });
     await syncDcim(client, dcim, devices);
-    const fromNb = await inventoryFromNetbox(client, dcim);
+    const fromNb = await inventoryFromNetbox(client, dcim, devices);
     assert.equal(fromNb.source, 'netbox');
     assert.deepEqual(fromNb.racks, inventoryFromConfig(dcim, devices).racks);
   });
@@ -44,7 +44,7 @@ test('NetBox is the source of truth: a server added there shows up in capacity',
     const { ids } = await syncDcim(client, dcim, devices);
     await client.create('dcim/devices/', { name: 'R6-GPU8-NEW', site: ids.site, rack: ids.racks.rack6, position: 10, face: 'front',
       device_type: ids.deviceTypes.gpu8, role: ids.roles['gpu-server'], status: 'active' });
-    const inv = await inventoryFromNetbox(client, dcim);
+    const inv = await inventoryFromNetbox(client, dcim, devices);
     const r6 = rack(cap({}, inv), 'rack6');
     assert.equal(r6.u.used, 5 + 8);
     assert.equal(r6.power.ratedKw, 13.8);
@@ -55,7 +55,7 @@ test('NetBox is the source of truth: a server added there shows up in capacity',
 
 test('missing NetBox site gives a clear message', async () => {
   await withNetbox({}, async url => {
-    await assert.rejects(inventoryFromNetbox(new NetboxClient({ url, token: TOKEN }), dcim), /chưa có site dxai-dc.*dcim:sync/);
+    await assert.rejects(inventoryFromNetbox(new NetboxClient({ url, token: TOKEN }), dcim, devices), /chưa có site dxai-dc.*dcim:sync/);
   });
 });
 

@@ -8,36 +8,72 @@ const realKeys = o => Object.entries(o).filter(([k]) => !k.startsWith('$'));
 const round = (x, d = 1) => (x === null || x === undefined ? null : Math.round(x * 10 ** d) / 10 ** d);
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-// Hồ sơ từ config: [{ id:'rack1', name:'R1', uHeight, devices:[{ name, type, u, position, ratedKw }] }]
+// Hồ sơ từ config: [{ id:'rack1', name:'R1', uHeight, devices:[{ name, type, u, position, ratedKw, sources }] }]
+// sources: đường cấp điện của từng nguồn (PSU) — [{ psu, side, rpdu, outlet, feed }], theo cách dcim:sync đi dây:
+// PSU1 → thanh nguồn A, PSU2 → thanh nguồn B, cùng số ổ cắm (thứ tự máy trong rack).
 function inventoryFromConfig(dcim, devices) {
   const byId = Object.fromEntries(devices.map(d => [d.id, d]));
   return {
     source: 'config',
-    racks: dcim.racks.map(r => ({
-      id: r.rack,
-      name: `R${byId[r.rack].position}`,
-      uHeight: dcim.rack.uHeight,
-      devices: r.devices.map(d => {
-        const t = dcim.deviceTypes[d.type];
-        return { name: d.name, type: d.type, u: t.u, position: d.position, ratedKw: t.ratedKw };
-      }),
-    })),
+    racks: dcim.racks.map(r => {
+      const R = `R${byId[r.rack].position}`;
+      return {
+        id: r.rack,
+        name: R,
+        uHeight: dcim.rack.uHeight,
+        devices: r.devices.map((d, i) => {
+          const t = dcim.deviceTypes[d.type];
+          const sources = dcim.power.feeds.slice(0, t.psu || 0).map(({ side }, k) => ({
+            psu: `PSU${k + 1}`, side, rpdu: `${R}-RPDU-${side}`, outlet: `Outlet ${i + 1}`, feed: `${R}-${side}`,
+          }));
+          return { name: d.name, type: d.type, u: t.u, position: d.position, ratedKw: t.ratedKw, sources };
+        }),
+      };
+    }),
   };
 }
 
 // Hồ sơ từ NetBox: rack có facility_id = keyPrefix + id; thiết bị trong rack có vị trí U.
 // Công suất định mức = maximum_draw lớn nhất trong các PSU (mỗi PSU chịu được cả máy).
 // Thiết bị 0U (thanh nguồn) không chiếm U và không tính tải.
-async function inventoryFromNetbox(client, dcim) {
+// Đường cấp điện lần theo cáp thật: PSU → ổ cắm thanh nguồn → cổng Input của thanh → power feed → tủ PDU.
+// Nguồn chưa cắm cáp thì không có trong sources; chuỗi đứt giữa chừng thì side = null.
+async function inventoryFromNetbox(client, dcim, devices) {
   const nb = dcim.netbox;
   const [site] = await client.list('dcim/sites/', { slug: nb.siteSlug });
   if (!site) throw new Error(`NetBox chưa có site ${nb.siteSlug}. Chạy npm run dcim:sync.`);
-  const [racks, devs, types, ports] = await Promise.all([
+  const [racks, devs, types, ports, outlets, feeds, panels] = await Promise.all([
     client.list('dcim/racks/', { site_id: site.id }),
     client.list('dcim/devices/', { site_id: site.id }),
     client.list('dcim/device-types/'),
     client.list('dcim/power-ports/', { site_id: site.id }),
+    client.list('dcim/power-outlets/', { site_id: site.id }),
+    client.list('dcim/power-feeds/', { site_id: site.id }),
+    client.list('dcim/power-panels/', { site_id: site.id }),
   ]);
+  const devName = Object.fromEntries(devs.map(d => [d.id, d.name]));
+  const portById = Object.fromEntries(ports.map(p => [p.id, p]));
+  const outletById = Object.fromEntries(outlets.map(o => [o.id, o]));
+  const feedById = Object.fromEntries(feeds.map(f => [f.id, f]));
+  // Tủ PDU sàn → phía A/B, theo tên thiết bị PDU trong devices.json (dcim:sync đặt tên tủ như vậy)
+  const pduName = id => { const d = devices.find(x => x.id === id); return d && (typeof d.name === 'object' ? d.name.vi : d.name); };
+  const sideByPanel = Object.fromEntries(panels.map(pl => [pl.id, (dcim.power.feeds.find(f => pduName(f.pdu) === pl.name) || {}).side || null]));
+  const peer = (x, type) => (x && x.cable && x.link_peers_type === type && x.link_peers && x.link_peers[0] ? x.link_peers[0].id : null);
+  const sourcesOf = deviceId => ports
+    .filter(p => p.device && p.device.id === deviceId && peer(p, 'dcim.poweroutlet'))
+    .map(p => {
+      const outlet = outletById[peer(p, 'dcim.poweroutlet')];
+      const input = outlet && outlet.power_port ? portById[outlet.power_port.id] : null;
+      const feed = feedById[peer(input, 'dcim.powerfeed')];
+      return {
+        psu: p.name,
+        side: feed && feed.power_panel ? sideByPanel[feed.power_panel.id] : null,
+        rpdu: outlet ? devName[outlet.device.id] : null,
+        outlet: outlet ? outlet.name : null,
+        feed: feed ? feed.name : null,
+      };
+    })
+    .sort((a, b) => a.psu.localeCompare(b.psu));
   const uOf = Object.fromEntries(types.map(t => [t.id, Number(t.u_height)]));
   const slugOf = Object.fromEntries(types.map(t => [t.id, t.slug]));
   const typeKey = Object.fromEntries(realKeys(dcim.deviceTypes).map(([k, t]) => [t.model.toLowerCase().replace(/[^a-z0-9]+/g, '-'), k]));
@@ -62,6 +98,7 @@ async function inventoryFromNetbox(client, dcim) {
             u: uOf[d.device_type.id],
             position: Number(d.position),
             ratedKw: (maxW[d.id] || 0) / 1000,
+            sources: sourcesOf(d.id),
           }))
           .sort((a, b) => a.position - b.position),
       }))
@@ -191,6 +228,7 @@ class DcimInventory {
   constructor({ client = null, dcim, devices, refreshMs = 60000, clock = Date.now, log = () => {} }) {
     this.client = client;
     this.dcim = dcim;
+    this.devices = devices;
     this.fallback = inventoryFromConfig(dcim, devices);
     this.current = this.fallback;
     this.refreshMs = refreshMs;
@@ -207,7 +245,7 @@ class DcimInventory {
     if (this._loading) return this._loading;
     this._loading = (async () => {
       try {
-        const inv = await inventoryFromNetbox(this.client, this.dcim);
+        const inv = await inventoryFromNetbox(this.client, this.dcim, this.devices);
         if (this.error || this.current.source !== 'netbox') this.log(`hồ sơ lấy từ NetBox (${inv.racks.length} rack)`);
         this.current = inv;
         this.error = null;
