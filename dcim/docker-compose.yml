@@ -1,0 +1,98 @@
+# NetBox (DCIM) cho bản demo: chỉ chạy ở máy local, cổng chỉ mở ở 127.0.0.1.
+# Image chính thức của cộng đồng netbox-docker. Bí mật lấy từ dcim/.env (không commit), do ./install.sh tự sinh.
+name: bms-dcim
+
+x-netbox-env: &netbox-env
+  ALLOWED_HOSTS: "*"
+  DB_HOST: postgres
+  DB_NAME: netbox
+  DB_USER: netbox
+  DB_PASSWORD: ${NETBOX_DB_PASSWORD:?Chạy ./install.sh để tạo dcim/.env}
+  REDIS_HOST: valkey
+  REDIS_PASSWORD: ${NETBOX_REDIS_PASSWORD:?}
+  REDIS_DATABASE: 0
+  REDIS_CACHE_HOST: valkey
+  REDIS_CACHE_DATABASE: 1
+  SECRET_KEY: ${NETBOX_SECRET_KEY:?}
+  # Bắt buộc để dùng token API v2 (nbt_…); phải dài ít nhất 50 ký tự
+  API_TOKEN_PEPPER_1: ${NETBOX_API_TOKEN_PEPPER:?}
+  SKIP_SUPERUSER: "false"
+  SUPERUSER_NAME: admin
+  SUPERUSER_EMAIL: admin@example.invalid
+  SUPERUSER_PASSWORD: ${NETBOX_ADMIN_PASSWORD:?}
+  CENSUS_REPORTING_ENABLED: "false"
+  TIME_ZONE: Asia/Ho_Chi_Minh
+
+services:
+  netbox:
+    image: netboxcommunity/netbox:v4.7.3-5.1.1
+    ports:
+      - "127.0.0.1:${NETBOX_PORT:-8001}:8080"
+    environment: *netbox-env
+    volumes:
+      - netbox-media:/opt/netbox/netbox/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opt/netbox/health.sh"]
+      # Lần chạy đầu NetBox chạy migration database: trên WSL2 đo được hơn 5 phút
+      start_period: 900s
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Chạy các tác vụ nền của NetBox (script, báo cáo, webhook)
+  netbox-worker:
+    image: netboxcommunity/netbox:v4.7.3-5.1.1
+    command: ["/opt/netbox/venv/bin/python", "/opt/netbox/netbox/manage.py", "rqworker"]
+    environment: *netbox-env
+    volumes:
+      - netbox-media:/opt/netbox/netbox/media
+    depends_on:
+      netbox:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "ps -aux | grep -v grep | grep -q rqworker || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: ${NETBOX_DB_PASSWORD:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -t 2 -d netbox -U netbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Hàng đợi tác vụ (DB 0) và cache (DB 1) dùng chung một Valkey (bản mã nguồn mở tương thích Redis)
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command: ["sh", "-c", "valkey-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${NETBOX_REDIS_PASSWORD:?}
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  netbox-media:
+  postgres-data:
+  valkey-data:
