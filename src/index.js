@@ -12,6 +12,8 @@ const { LANGS } = require('./locale');
 const { checkBasicAuth } = require('./auth');
 const { ItopClient } = require('./itop');
 const { ItsmConnector } = require('./itsm');
+const { NetboxClient } = require('./netbox');
+const { DcimInventory, computeCapacity, planPlacement } = require('./dcim-capacity');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -80,6 +82,24 @@ if (process.env.ITSM_ENABLED === '1') {
     });
   }
 }
+
+// DCIM: dung lượng rack/PDU. Hồ sơ đọc từ NetBox khi có token (DCIM_API_KEY, DCIM_API_TOKEN, vd. qua
+// `npm run start:dcim`), làm mới mỗi phút; không có NetBox (vd. trên Render) thì dùng config/dcim.json.
+// DCIM_SOURCE=config: bỏ qua NetBox dù có token.
+const dcimCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/dcim.json'), 'utf8'));
+const useNetbox = process.env.DCIM_SOURCE !== 'config' && process.env.DCIM_API_KEY && process.env.DCIM_API_TOKEN;
+const netboxUrl = process.env.NETBOX_URL || (process.env.NETBOX_PORT ? `http://127.0.0.1:${process.env.NETBOX_PORT}/` : dcimCfg.netbox.url);
+const dcimInventory = new DcimInventory({
+  client: useNetbox ? new NetboxClient({ url: netboxUrl, token: `nbt_${process.env.DCIM_API_KEY}.${process.env.DCIM_API_TOKEN}`, timeoutMs: 8000 }) : null,
+  dcim: dcimCfg,
+  devices: cfg.devices,
+  log: m => console.log(`[dcim] ${m}`),
+});
+const dcimCapacity = () => {
+  const inventory = dcimInventory.get();
+  return { ...computeCapacity({ inventory, dcim: dcimCfg, rules, values: last ? last.values : {}, ts: last ? last.ts : null }),
+    sourceName: inventory.sourceName, sourceError: inventory.error, netboxUrl: useNetbox ? netboxUrl : null };
+};
 
 let last = null;
 const sseClients = new Set();
@@ -168,6 +188,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && p === '/api/alarms') return json(res, 200, alarms.list());
     if (req.method === 'GET' && p === '/api/itsm') return json(res, 200, itsm ? itsm.snapshot() : { enabled: false });
+    if (req.method === 'GET' && p === '/api/dcim/capacity') return json(res, 200, dcimCapacity());
+    if (req.method === 'GET' && p === '/api/dcim/plan') {
+      // ?type=gpu8&count=2 (loại trong config/dcim.json) hoặc ?u=8&kw=10.2&count=2
+      const t = dcimCfg.deviceTypes[url.searchParams.get('type')];
+      const q = {
+        u: t ? t.u : Number(url.searchParams.get('u')),
+        ratedKw: t ? t.ratedKw : Number(url.searchParams.get('kw')),
+        count: Number(url.searchParams.get('count') || 1),
+      };
+      if (url.searchParams.get('type') && !t) return json(res, 400, { error: 'Unknown device type' });
+      return json(res, 200, planPlacement(dcimCapacity(), q));
+    }
     if (req.method === 'GET' && p === '/api/events') {
       const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 500);
       return json(res, 200, recentEvents.slice(-limit).reverse());
@@ -213,5 +245,7 @@ server.listen(PORT, HOST, () => {
   if (SIM_PROXY) console.log(`[bms] Demo mode: /sim/api/faults -> simulator ${SIM_HOST}:${SIM_CONTROL_PORT}`);
   console.log(`[bms] Basic auth: ${AUTH_PASSWORD ? `on (user "${AUTH_USER}")` : 'off'}`);
   console.log(`[bms] ITSM: ${itsm ? `on -> ${itsm.itopUrl} (warning hold ${itsm.holdMs / 1000} s)` : 'off'}`);
+  console.log(`[bms] DCIM: hồ sơ từ ${useNetbox ? `NetBox ${netboxUrl} (dự phòng: config/dcim.json)` : 'config/dcim.json'}`);
+  dcimInventory.refresh();
   collector.start();
 });
