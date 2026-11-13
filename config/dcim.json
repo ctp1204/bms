@@ -1,0 +1,97 @@
+{
+  "$comment": "Mô hình DCIM (Giai đoạn 0). NetBox là nguồn gốc của thông tin vật lý: rack, vị trí U, thiết bị, chuỗi cấp điện. iTop chỉ nhận bản đồng bộ để gắn CI vào ticket. Chỉ làm chuỗi điện, chưa làm cáp mạng. Máy chủ là dữ liệu mẫu cho demo, không phải thiết bị thật.",
+
+  "netbox": {
+    "$comment": "Tên đối tượng trong NetBox. Script dựng NetBox tạo chúng; bộ đồng bộ dùng để tìm lại. Cổng 8001 vì iTop đã dùng 8000.",
+    "url": "http://127.0.0.1:8001/",
+    "site": "DXAI Data Center",
+    "location": "Phòng máy 1",
+    "manufacturer": "Demo",
+    "tag": "bms-demo"
+  },
+
+  "rack": {
+    "$comment": "budgetKw: ngân sách điện thiết kế mỗi rack (rack AI/HPC). Màu theo tỷ lệ dùng: < warnPct xanh, warnPct–critPct vàng, > critPct đỏ.",
+    "uHeight": 42,
+    "budgetKw": 35,
+    "warnPct": 70,
+    "critPct": 90
+  },
+
+  "power": {
+    "$comment": "Chuỗi điện giống bộ giả lập: MSB → UPS-1 → PDU-A, PDU-B (tủ phân phối sàn) → mỗi rack một thanh nguồn A và một thanh nguồn B → mỗi máy chủ cắm cả hai. PDU sàn định mức 140 kW: ngưỡng cảnh báo trong alarms.json là 50% (mất dự phòng 2N), 80% và 95% của định mức. Thanh nguồn trong rack phải gánh được cả rack khi mất phía bên kia.",
+    "msb": "msb1",
+    "ups": "ups1",
+    "feeds": [
+      { "side": "A", "pdu": "pdua" },
+      { "side": "B", "pdu": "pdub" }
+    ],
+    "pduRatedKw": 140,
+    "redundancyMaxPct": 50,
+    "rackPduRatedKw": 43
+  },
+
+  "deviceTypes": {
+    "$comment": "ratedKw: công suất định mức (nameplate). u: số U chiếm trong rack; 0 là thiết bị gắn dọc, không chiếm U. psu: số nguồn, máy chủ có 2 để cắm cả A và B.",
+    "gpu8":    { "model": "GPU Server 8x", "u": 8, "ratedKw": 10.2, "psu": 2, "role": "gpu-server", "name": { "vi": "Máy chủ 8 GPU", "ja": "8 GPU サーバー" } },
+    "gpu4":    { "model": "GPU Server 4x", "u": 4, "ratedKw": 3.2,  "psu": 2, "role": "gpu-server", "name": { "vi": "Máy chủ 4 GPU", "ja": "4 GPU サーバー" } },
+    "compute": { "model": "Compute 1U",    "u": 1, "ratedKw": 0.9,  "psu": 2, "role": "compute",    "name": { "vi": "Máy chủ tính toán", "ja": "計算サーバー" } },
+    "storage": { "model": "Storage 2U",    "u": 2, "ratedKw": 1.2,  "psu": 2, "role": "storage",    "name": { "vi": "Máy lưu trữ", "ja": "ストレージ" } },
+    "switch":  { "model": "Switch 1U",     "u": 1, "ratedKw": 0.6,  "psu": 2, "role": "network",    "name": { "vi": "Switch", "ja": "スイッチ" } },
+    "rpdu":    { "model": "Rack PDU 3P 63A", "u": 0, "ratedKw": 43, "outlets": 24, "role": "rack-pdu", "name": { "vi": "Thanh nguồn rack", "ja": "ラック PDU" } }
+  },
+
+  "racks": [
+    { "rack": "rack1", "$comment": "Khá đầy", "devices": [
+      { "name": "R1-GPU8-1", "type": "gpu8", "position": 1 },
+      { "name": "R1-GPU8-2", "type": "gpu8", "position": 9 },
+      { "name": "R1-GPU4-1", "type": "gpu4", "position": 17 },
+      { "name": "R1-GPU4-2", "type": "gpu4", "position": 21 },
+      { "name": "R1-SW-1", "type": "switch", "position": 42 }
+    ] },
+    { "rack": "rack2", "devices": [
+      { "name": "R2-GPU8-1", "type": "gpu8", "position": 1 },
+      { "name": "R2-GPU8-2", "type": "gpu8", "position": 9 },
+      { "name": "R2-GPU4-1", "type": "gpu4", "position": 17 },
+      { "name": "R2-SW-1", "type": "switch", "position": 42 }
+    ] },
+    { "rack": "rack3", "devices": [
+      { "name": "R3-GPU8-1", "type": "gpu8", "position": 1 },
+      { "name": "R3-GPU4-1", "type": "gpu4", "position": 9 },
+      { "name": "R3-GPU4-2", "type": "gpu4", "position": 13 },
+      { "name": "R3-GPU4-3", "type": "gpu4", "position": 17 },
+      { "name": "R3-STO-1", "type": "storage", "position": 21 }
+    ] },
+    { "rack": "rack4", "$comment": "Gần hết điện; cũng là điểm nóng nhiệt sẵn có trong bộ giả lập", "devices": [
+      { "name": "R4-GPU8-1", "type": "gpu8", "position": 1 },
+      { "name": "R4-GPU8-2", "type": "gpu8", "position": 9 },
+      { "name": "R4-GPU8-3", "type": "gpu8", "position": 17 },
+      { "name": "R4-SW-1", "type": "switch", "position": 42 }
+    ] },
+    { "rack": "rack5", "devices": [
+      { "name": "R5-GPU8-1", "type": "gpu8", "position": 1 },
+      { "name": "R5-GPU4-1", "type": "gpu4", "position": 9 },
+      { "name": "R5-GPU4-2", "type": "gpu4", "position": 13 },
+      { "name": "R5-STO-1", "type": "storage", "position": 17 }
+    ] },
+    { "rack": "rack6", "$comment": "Gần trống: nơi lắp thiết bị mới", "devices": [
+      { "name": "R6-CMP-1", "type": "compute", "position": 1 },
+      { "name": "R6-CMP-2", "type": "compute", "position": 2 },
+      { "name": "R6-STO-1", "type": "storage", "position": 3 },
+      { "name": "R6-SW-1", "type": "switch", "position": 42 }
+    ] }
+  ],
+
+  "infra": {
+    "$comment": "Ánh xạ 16 thiết bị trong devices.json sang NetBox. rack_sensor → chính Rack (cảm biến nói về rack). pdu → power panel (tủ phân phối sàn, mỗi rack một power feed). Còn lại là thiết bị đặt trong phòng, không nằm trong rack, với role tương ứng.",
+    "rack_sensor": { "kind": "rack" },
+    "pdu":         { "kind": "power-panel" },
+    "power_meter": { "kind": "device", "role": "switchboard" },
+    "ups":         { "kind": "device", "role": "ups" },
+    "generator":   { "kind": "device", "role": "generator" },
+    "ats":         { "kind": "device", "role": "ats" },
+    "crah":        { "kind": "device", "role": "cooling" },
+    "chiller":     { "kind": "device", "role": "cooling" },
+    "leak":        { "kind": "device", "role": "sensor" }
+  }
+}
