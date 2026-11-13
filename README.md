@@ -458,7 +458,7 @@ Gói ngrok miễn phí chỉ có **một tên miền**, nên một proxy nginx (
 
 Cài lần đầu:
 
-1. Đăng ký https://dashboard.ngrok.com/signup, lấy authtoken ở https://dashboard.ngrok.com/get-started/your-authtoken, thêm vào `itsm/.env`: `NGROK_AUTHTOKEN=...`. Token là bí mật: chỉ để trong `.env`.
+1. Đăng ký https://dashboard.ngrok.com/signup, lấy authtoken ở https://dashboard.ngrok.com/get-started/your-authtoken, thêm vào `itsm/.env`: `NGROK_AUTHTOKEN=...`. Token là bí mật: chỉ để trong `.env`. Để ghim địa chỉ, chép tên miền dev ở https://dashboard.ngrok.com/domains vào `NGROK_DOMAIN=...` (không có `https://`).
 2. `./itsm/tunnel.sh`: cấu hình iTop chạy sau đường hầm, bật proxy và đường hầm, kiểm tra đường hầm trả lời, rồi in ra địa chỉ. Nếu có `dcim/.env`, script ghi địa chỉ công khai vào `NETBOX_PUBLIC_ORIGIN` (để đăng nhập NetBox qua HTTPS), dựng lại NetBox nếu địa chỉ đổi, kiểm tra API NetBox qua đường hầm và in thêm các biến DCIM.
 3. Trên Render: **Dashboard → bms-demo → Environment**, đặt `ITSM_ENABLED=1`, `ITSM_URL=<địa chỉ vừa in>`, `ITSM_PASSWORD=<ITSM_PASSWORD trong itsm/.env>`, rồi **Save**. Render tự deploy lại. `ITSM_USER` và `ITSM_WARNING_HOLD_SEC=30` đã có trong `render.yaml`; link NOC trong ticket lấy từ `RENDER_EXTERNAL_URL` do Render tự đặt.
 4. (Nếu dùng NetBox) đặt thêm `NETBOX_URL=<địa chỉ vừa in>/netbox/`, `DCIM_API_KEY` và `DCIM_API_TOKEN` (giá trị trong `dcim/.env`). Không đặt thì tab Dung lượng trên Render dùng `config/dcim.json`.
