@@ -177,6 +177,12 @@ const server = http.createServer(async (req, res) => {
         rules: rules.map(({ id, point, op, value, severity, type }) => ({ id, point, op, value, severity, type })),
         simControlPort: SIM_CONTROL_PORT,
         simControlPath: SIM_PROXY ? '/sim' : null,
+        // Loại thiết bị lắp rack được (u > 0), cho công cụ "lắp vào đâu" trên dashboard
+        dcim: {
+          types: Object.entries(dcimCfg.deviceTypes)
+            .filter(([k, t]) => !k.startsWith('$') && t.u > 0)
+            .map(([key, t]) => ({ key, name: t.name, u: t.u, ratedKw: t.ratedKw })),
+        },
       });
     }
     if (req.method === 'GET' && p === '/api/snapshot') return json(res, 200, last || {});

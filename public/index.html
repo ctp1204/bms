@@ -23,6 +23,7 @@
     <button role="tab" data-view="overview"><span data-i18n="view.overview"></span> <span class="count" data-badge="all"></span></button>
     <button role="tab" data-view="cooling"><span data-i18n="view.cooling"></span> <span class="count" data-badge="cooling"></span></button>
     <button role="tab" data-view="power"><span data-i18n="view.power"></span> <span class="count" data-badge="power"></span></button>
+    <button role="tab" data-view="capacity"><span data-i18n="view.capacity"></span></button>
   </nav>
 
   <main>
@@ -104,6 +105,38 @@
       <section class="card">
         <div class="card-head"><h2 data-i18n="devices.titlePower"></h2><span class="muted small" data-i18n="devices.sub"></span></div>
         <div class="table-wrap"><table id="devices-power"></table></div>
+      </section>
+    </div>
+
+    <!-- Dung lượng (DCIM): hồ sơ NetBox + số đo EPMS/BMS -->
+    <div class="view" data-panel="capacity" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2 data-i18n="cap.title"></h2>
+          <span class="muted small" id="cap-source"></span>
+        </div>
+        <div class="legend" id="cap-legend"></div>
+        <div class="floor-wrap"><svg id="elev" viewBox="0 0 960 520" role="img" data-i18n-aria="cap.aria"></svg></div>
+      </section>
+      <div class="grid2">
+        <section class="card">
+          <div class="card-head"><h2 data-i18n="plan.title"></h2></div>
+          <form id="plan-form" class="plan-form">
+            <label><span data-i18n="plan.type"></span> <select id="plan-type"></select></label>
+            <label><span data-i18n="plan.count"></span> <input id="plan-count" type="number" min="1" max="10" value="1"></label>
+            <button class="btn primary" type="submit" data-i18n="plan.go"></button>
+          </form>
+          <div id="plan-result" aria-live="polite"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2 data-i18n="cap.floorTitle"></h2></div>
+          <div id="cap-floor"></div>
+          <p class="muted small" data-i18n="cap.floorNote"></p>
+        </section>
+      </div>
+      <section class="card">
+        <div class="card-head"><h2 data-i18n="cap.tableTitle"></h2><span class="muted small" data-i18n="cap.tableNote"></span></div>
+        <div class="table-wrap"><table id="cap-table"></table></div>
       </section>
     </div>
 
