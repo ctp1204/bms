@@ -6,8 +6,12 @@
     "url": "http://127.0.0.1:8001/",
     "site": "DXAI Data Center",
     "location": "Phòng máy 1",
+    "siteSlug": "dxai-dc",
+    "locationSlug": "phong-may-1",
     "manufacturer": "Demo",
-    "tag": "bms-demo"
+    "tag": "bms-demo",
+    "$comment2": "Khóa liên kết với devices.json: Rack.facility_id và Device.asset_tag = keyPrefix + id thiết bị (cùng tiền tố với CMDB của iTop).",
+    "keyPrefix": "bms:"
   },
 
   "rack": {
@@ -28,7 +32,24 @@
     ],
     "pduRatedKw": 140,
     "redundancyMaxPct": 50,
-    "rackPduRatedKw": 43
+    "rackPduRatedKw": 43,
+    "$comment2": "Mỗi rack có 2 power feed (A từ PDU-A, B từ PDU-B), 3 pha 400 V 63 A. NetBox tính công suất khả dụng = √3 × V × A × maxUtilization% = 34.917 W (hiện trên trang power feed, API không trả về), khớp ngân sách 35 kW/rack.",
+    "feed": { "voltage": 400, "amperage": 63, "phase": "three-phase", "maxUtilization": 80 }
+  },
+
+  "roles": {
+    "$comment": "Device role trong NetBox: slug → tên hiển thị và màu (hex, không có #).",
+    "gpu-server":  { "name": "Máy chủ GPU", "color": "6a4c9c" },
+    "compute":     { "name": "Máy chủ tính toán", "color": "2d5c9b" },
+    "storage":     { "name": "Lưu trữ", "color": "27763b" },
+    "network":     { "name": "Mạng", "color": "0b6a65" },
+    "rack-pdu":    { "name": "Thanh nguồn rack", "color": "9e5e06" },
+    "switchboard": { "name": "Tủ điện", "color": "b0281f" },
+    "ups":         { "name": "UPS", "color": "b0281f" },
+    "generator":   { "name": "Máy phát", "color": "b0281f" },
+    "ats":         { "name": "ATS", "color": "b0281f" },
+    "cooling":     { "name": "Làm mát", "color": "2d5c9b" },
+    "sensor":      { "name": "Cảm biến", "color": "55625e" }
   },
 
   "deviceTypes": {
@@ -86,12 +107,12 @@
     "$comment": "Ánh xạ 16 thiết bị trong devices.json sang NetBox. rack_sensor → chính Rack (cảm biến nói về rack). pdu → power panel (tủ phân phối sàn, mỗi rack một power feed). Còn lại là thiết bị đặt trong phòng, không nằm trong rack, với role tương ứng.",
     "rack_sensor": { "kind": "rack" },
     "pdu":         { "kind": "power-panel" },
-    "power_meter": { "kind": "device", "role": "switchboard" },
-    "ups":         { "kind": "device", "role": "ups" },
-    "generator":   { "kind": "device", "role": "generator" },
-    "ats":         { "kind": "device", "role": "ats" },
-    "crah":        { "kind": "device", "role": "cooling" },
-    "chiller":     { "kind": "device", "role": "cooling" },
-    "leak":        { "kind": "device", "role": "sensor" }
+    "power_meter": { "kind": "device", "role": "switchboard", "model": "Main Switchboard" },
+    "ups":         { "kind": "device", "role": "ups", "model": "UPS 250 kW" },
+    "generator":   { "kind": "device", "role": "generator", "model": "Generator" },
+    "ats":         { "kind": "device", "role": "ats", "model": "ATS" },
+    "crah":        { "kind": "device", "role": "cooling", "model": "CRAH 100 kW" },
+    "chiller":     { "kind": "device", "role": "cooling", "model": "Chiller" },
+    "leak":        { "kind": "device", "role": "sensor", "model": "Leak Detection Cable" }
   }
 }

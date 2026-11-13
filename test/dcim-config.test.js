@@ -63,6 +63,19 @@ test('PDU rating agrees with the PDU alarm thresholds in alarms.json', () => {
   assert.ok(dcim.power.rackPduRatedKw >= dcim.rack.budgetKw, 'one rack PDU must carry the whole rack when the other side is lost');
 });
 
+test('each rack feed delivers the rack budget (as NetBox computes it) and every role is defined', () => {
+  const f = dcim.power.feed;
+  const phases = f.phase === 'three-phase' ? Math.sqrt(3) : 1;
+  const availableKw = (phases * f.voltage * f.amperage * f.maxUtilization / 100) / 1000;
+  assert.ok(Math.abs(availableKw - dcim.rack.budgetKw) < 0.5, `feed gives ${availableKw.toFixed(1)} kW, budget ${dcim.rack.budgetKw} kW`);
+  const roles = Object.keys(dcim.roles).filter(k => !k.startsWith('$'));
+  const used = [...Object.values(types).map(t => t.role),
+    ...Object.entries(dcim.infra).filter(([k, m]) => !k.startsWith('$') && m.kind === 'device').map(([, m]) => m.role)];
+  for (const r of used) assert.ok(roles.includes(r), `role ${r} is not defined in dcim.roles`);
+  for (const r of roles) assert.match(dcim.roles[r].color, /^[0-9a-f]{6}$/);
+  for (const [k, m] of Object.entries(dcim.infra)) if (!k.startsWith('$') && m.kind === 'device') assert.ok(m.model, `${k}: device needs a model`);
+});
+
 test('power chain and infra mapping reference real devices and cover every device type', () => {
   const ids = new Set(devices.map(d => d.id));
   for (const id of [dcim.power.msb, dcim.power.ups, ...dcim.power.feeds.map(f => f.pdu)]) assert.ok(ids.has(id), `unknown device ${id}`);
