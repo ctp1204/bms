@@ -1,0 +1,38 @@
+# Cổng vào chung sau đường hầm (ngrok hoặc Cloudflare): một địa chỉ công khai cho cả hai hệ thống.
+#   /netbox/  → NetBox (chạy dưới BASE_PATH netbox/, mở ở 127.0.0.1:${NETBOX_PORT} trên máy này)
+#   /         → iTop
+# Gói ngrok miễn phí chỉ có một tên miền nên phải chia theo đường dẫn.
+# ${NETBOX_PORT} được image nginx thay khi khởi động; các biến $... khác là biến của nginx.
+
+# Giữ nguyên giao thức gốc (https) mà đường hầm báo, để iTop và NetBox dựng link https
+map $http_x_forwarded_proto $fwd_proto {
+  default $http_x_forwarded_proto;
+  ""      $scheme;
+}
+
+server {
+  listen 80;
+  client_max_body_size 25m;
+  # Docker DNS: tìm lại địa chỉ itop khi container được dựng lại
+  resolver 127.0.0.11 valid=30s;
+
+  location /netbox/ {
+    proxy_pass http://host.docker.internal:${NETBOX_PORT};
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $fwd_proto;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
+  }
+
+  location / {
+    set $itop http://itop:80;
+    proxy_pass $itop;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $fwd_proto;
+    proxy_set_header X-Forwarded-Port $http_x_forwarded_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
+  }
+}

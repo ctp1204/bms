@@ -2,8 +2,8 @@
   "$comment": "Mô hình DCIM (Giai đoạn 0). NetBox là nguồn gốc của thông tin vật lý: rack, vị trí U, thiết bị, chuỗi cấp điện. iTop chỉ nhận bản đồng bộ để gắn CI vào ticket. Chỉ làm chuỗi điện, chưa làm cáp mạng. Máy chủ là dữ liệu mẫu cho demo, không phải thiết bị thật.",
 
   "netbox": {
-    "$comment": "Tên đối tượng trong NetBox. Script dựng NetBox tạo chúng; bộ đồng bộ dùng để tìm lại. Cổng 8001 vì iTop đã dùng 8000.",
-    "url": "http://127.0.0.1:8001/",
+    "$comment": "Tên đối tượng trong NetBox. Script dựng NetBox tạo chúng; bộ đồng bộ dùng để tìm lại. Cổng 8001 vì iTop đã dùng 8000. NetBox chạy dưới /netbox/ (BASE_PATH) để chung địa chỉ ngrok với iTop.",
+    "url": "http://127.0.0.1:8001/netbox/",
     "site": "DXAI Data Center",
     "location": "Phòng máy 1",
     "siteSlug": "dxai-dc",

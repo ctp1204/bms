@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 set -a; . ./.env; set +a
-BASE="${NETBOX_URL:-http://127.0.0.1:${NETBOX_PORT:-8001}/}"
+BASE="${NETBOX_URL:-http://127.0.0.1:${NETBOX_PORT:-8001}/netbox/}"
 API="${BASE%/}/api"
 AUTH="Authorization: Bearer nbt_${DCIM_API_KEY}.${DCIM_API_TOKEN}"
 

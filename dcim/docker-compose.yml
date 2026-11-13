@@ -22,6 +22,10 @@ x-netbox-env: &netbox-env
   SUPERUSER_PASSWORD: ${NETBOX_ADMIN_PASSWORD:?}
   CENSUS_REPORTING_ENABLED: "false"
   TIME_ZONE: Asia/Ho_Chi_Minh
+  # NetBox ở http://127.0.0.1:8001/netbox/; cùng đường dẫn khi đi qua đường hầm ngrok chung với iTop (xem itsm/tunnel.sh)
+  BASE_PATH: netbox/
+  # Đăng nhập giao diện qua HTTPS của đường hầm cần khai báo địa chỉ công khai; itsm/tunnel.sh tự ghi NETBOX_PUBLIC_ORIGIN vào dcim/.env
+  CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:${NETBOX_PORT:-8001} ${NETBOX_PUBLIC_ORIGIN:-}"
 
 services:
   netbox:
@@ -31,13 +35,17 @@ services:
     environment: *netbox-env
     volumes:
       - netbox-media:/opt/netbox/netbox/media
+      - ./netbox-env.py:/etc/netbox/config/zz_env.py:ro
+      # File tĩnh (CSS, JS) phục vụ dưới /netbox/static theo BASE_PATH
+      - ./launch-netbox.sh:/opt/netbox/launch-netbox.sh:ro
     depends_on:
       postgres:
         condition: service_healthy
       valkey:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/opt/netbox/health.sh"]
+      # health.sh có sẵn trong image gọi /login/, không biết BASE_PATH
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/netbox/login/ >/dev/null || exit 1"]
       # Lần chạy đầu NetBox chạy migration database: trên WSL2 đo được hơn 5 phút
       start_period: 900s
       interval: 15s
@@ -52,6 +60,7 @@ services:
     environment: *netbox-env
     volumes:
       - netbox-media:/opt/netbox/netbox/media
+      - ./netbox-env.py:/etc/netbox/config/zz_env.py:ro
     depends_on:
       netbox:
         condition: service_healthy

@@ -157,12 +157,14 @@ bms/
 │   ├── install.sh        # cài iTop tự động, không cần wizard
 │   ├── bootstrap.sh/.php # tổ chức, nhóm xử lý, tài khoản API
 │   ├── smoke-test.sh     # thử REST API (local hoặc qua đường hầm)
-│   ├── tunnel.sh         # mở iTop qua đường hầm (ngrok hoặc Cloudflare) cho bản Render
+│   ├── tunnel.sh         # mở iTop (và NetBox ở /netbox/) qua đường hầm (ngrok hoặc Cloudflare) cho bản Render
+│   ├── gateway/          # nginx sau đường hầm: / → iTop, /netbox/ → NetBox
 │   └── .env.example      # mẫu mật khẩu; .env thật không commit
 ├── dcim/                 # NetBox chạy bằng Docker (chỉ ở máy local)
 │   ├── docker-compose.yml
 │   ├── install.sh        # tự sinh dcim/.env, bật NetBox, tạo tài khoản API bms-dcim
 │   ├── bootstrap.py      # tài khoản API quyền tối thiểu (xem/thêm/sửa, không xóa)
+│   ├── netbox-env.py, launch-netbox.sh # chạy NetBox dưới /netbox/ (BASE_PATH)
 │   ├── smoke-test.sh     # thử REST API và kiểm tra quyền
 │   └── .env.example
 ├── test/                 # test bằng node:test
@@ -314,7 +316,7 @@ Biến dùng được trong `message`: `{device}`, `{name}`, `{value}`, `{uom}`.
 | `ITSM_NOC_URL` | `RENDER_EXTERNAL_URL` hoặc `http://127.0.0.1:<PORT>/` | Link NOC ghi trong ticket |
 | `ITSM_CMDB_USER`, `ITSM_CMDB_PASSWORD` | `bms-cmdb` | Tài khoản riêng cho `npm run itsm:cmdb` |
 | `DCIM_API_KEY`, `DCIM_API_TOKEN` | (trống) | Token NetBox của `bms-dcim` (trong `dcim/.env`). Có thì hồ sơ DCIM đọc từ NetBox; không có thì dùng `config/dcim.json` |
-| `NETBOX_URL` / `NETBOX_PORT` | `http://127.0.0.1:8001/` | Địa chỉ NetBox |
+| `NETBOX_URL` / `NETBOX_PORT` | `http://127.0.0.1:8001/netbox/` | Địa chỉ NetBox (chạy dưới `/netbox/`). Trên Render: `<địa chỉ đường hầm>/netbox/` |
 | `DCIM_SOURCE` | (trống) | `config`: bỏ qua NetBox dù có token |
 
 Ví dụ chạy song song với một bản khác:
@@ -439,8 +441,11 @@ Xóa sạch iTop để làm lại từ đầu: `cd itsm && docker compose down -
 Render free không chạy được iTop (cần MariaDB và ổ đĩa lưu dữ liệu, gói free không có). Cách miễn phí: **demo vẫn ở Render, iTop chạy ở máy bạn**, mở ra internet qua một đường hầm HTTPS chạy bằng Docker.
 
 ```
-Người xem ──► Demo trên Render ──REST──► https://<tên miền ngrok> ──► iTop trên máy bạn
+Người xem ──► Demo trên Render ──REST──► https://<tên miền ngrok>/         ──► iTop trên máy bạn
+                                  └────► https://<tên miền ngrok>/netbox/  ──► NetBox trên máy bạn (nếu đã cài, mục 14)
 ```
+
+Gói ngrok miễn phí chỉ có **một tên miền**, nên một proxy nginx (`itsm/gateway/`) đứng sau đường hầm chia theo đường dẫn: `/` cho iTop, `/netbox/` cho NetBox. NetBox vì vậy luôn chạy dưới `/netbox/`, kể cả ở máy (http://127.0.0.1:8001/netbox/).
 
 `./itsm/tunnel.sh` chọn đường hầm theo `itsm/.env`:
 
@@ -454,16 +459,18 @@ Người xem ──► Demo trên Render ──REST──► https://<tên miề
 Cài lần đầu:
 
 1. Đăng ký https://dashboard.ngrok.com/signup, lấy authtoken ở https://dashboard.ngrok.com/get-started/your-authtoken, thêm vào `itsm/.env`: `NGROK_AUTHTOKEN=...`. Token là bí mật: chỉ để trong `.env`.
-2. `./itsm/tunnel.sh`: cấu hình iTop chạy sau đường hầm, bật đường hầm, kiểm tra đường hầm trả lời, rồi in ra địa chỉ.
+2. `./itsm/tunnel.sh`: cấu hình iTop chạy sau đường hầm, bật proxy và đường hầm, kiểm tra đường hầm trả lời, rồi in ra địa chỉ. Nếu có `dcim/.env`, script ghi địa chỉ công khai vào `NETBOX_PUBLIC_ORIGIN` (để đăng nhập NetBox qua HTTPS), dựng lại NetBox nếu địa chỉ đổi, kiểm tra API NetBox qua đường hầm và in thêm các biến DCIM.
 3. Trên Render: **Dashboard → bms-demo → Environment**, đặt `ITSM_ENABLED=1`, `ITSM_URL=<địa chỉ vừa in>`, `ITSM_PASSWORD=<ITSM_PASSWORD trong itsm/.env>`, rồi **Save**. Render tự deploy lại. `ITSM_USER` và `ITSM_WARNING_HOLD_SEC=30` đã có trong `render.yaml`; link NOC trong ticket lấy từ `RENDER_EXTERNAL_URL` do Render tự đặt.
-4. Mở bản Render: header hiện `iTop: sẵn sàng`. Bật một sự cố để thấy ticket.
+4. (Nếu dùng NetBox) đặt thêm `NETBOX_URL=<địa chỉ vừa in>/netbox/`, `DCIM_API_KEY` và `DCIM_API_TOKEN` (giá trị trong `dcim/.env`). Không đặt thì tab Dung lượng trên Render dùng `config/dcim.json`.
+5. Mở bản Render: header hiện `iTop: sẵn sàng`; tab Dung lượng ghi "Hồ sơ: NetBox". Bật một sự cố để thấy ticket.
 
 Những lần sau chỉ cần `./itsm/tunnel.sh` (với ngrok không phải sửa gì trên Render). Các lệnh khác: `./itsm/tunnel.sh url` (in lại địa chỉ), `./itsm/tunnel.sh down` (tắt đường hầm). Thử API qua đường hầm: `ITSM_URL=<địa chỉ> ./itsm/smoke-test.sh`.
 
 Lưu ý:
 
 - **Máy bạn phải bật** khi demo. iTop hoặc đường hầm tắt thì header báo `iTop: lỗi, đang thử lại`; ticket được tạo bù khi bật lại, trừ khi Render cho app ngủ trước đó (gói free không lưu `data/itsm-state.json`, hàng đợi mất theo).
-- **iTop được mở ra internet** trong lúc đường hầm chạy: giữ mật khẩu admin mạnh, tắt đường hầm khi không dùng.
+- **iTop và NetBox được mở ra internet** trong lúc đường hầm chạy: giữ mật khẩu admin mạnh (NetBox: sinh ngẫu nhiên trong `dcim/.env`), tắt đường hầm khi không dùng. Token `bms-dcim` không xóa được dữ liệu.
+- NetBox là một cụm Docker riêng; proxy gọi nó qua `host.docker.internal:8001` (cổng NetBox trên máy). Đã thử với Docker Desktop trên WSL2.
 - iTop được cấu hình `app_root_url` trống và `behind_reverse_proxy = true` để tự dựng địa chỉ theo request; Apache trong image thêm `X-Forwarded-Port: 443` khi đường hầm không gửi (xem `itsm/apache-proxy.conf`). An toàn vì cổng iTop chỉ mở ở `127.0.0.1`.
 - Nếu iTop báo lỗi 500 sau khi dựng lại container (thiếu data model biên dịch), chạy `./itsm/install.sh`: script nhận ra và biên dịch lại, giữ nguyên dữ liệu.
 
@@ -507,13 +514,13 @@ Toàn bộ nằm trong `config/dcim.json`; test giữ cho mô hình khớp với
 Cần Docker. Lần đầu NetBox chạy migration database, có thể mất 5–15 phút.
 
 ```bash
-./dcim/install.sh        # tự sinh dcim/.env (mật khẩu ngẫu nhiên), bật NetBox ở 127.0.0.1:8001, tạo tài khoản API bms-dcim
+./dcim/install.sh        # tự sinh dcim/.env (mật khẩu ngẫu nhiên), bật NetBox ở 127.0.0.1:8001/netbox/, tạo tài khoản API bms-dcim
 ./dcim/smoke-test.sh     # thử API: đọc được, thêm được, KHÔNG xóa được, không xem được người dùng
 npm run dcim:sync        # tạo site, phòng máy, rack, loại thiết bị, tủ PDU, feed, thiết bị, máy chủ và cáp nguồn trong NetBox
 npm run itsm:cmdb        # (nếu dùng iTop) đưa máy chủ từ NetBox vào CMDB của iTop
 ```
 
-Đăng nhập NetBox ở http://127.0.0.1:8001 bằng `admin` với `NETBOX_ADMIN_PASSWORD` trong `dcim/.env`. `npm run dcim:sync` chạy lại được bất cứ lúc nào: chỉ tạo phần thiếu và sửa trường bị lệch, **không bao giờ xóa**; đối tượng trùng hoặc cáp cắm sai chỗ được báo là xung đột để người kiểm tra.
+Đăng nhập NetBox ở http://127.0.0.1:8001/netbox/ bằng `admin` với `NETBOX_ADMIN_PASSWORD` trong `dcim/.env`. `npm run dcim:sync` chạy lại được bất cứ lúc nào: chỉ tạo phần thiếu và sửa trường bị lệch, **không bao giờ xóa**; đối tượng trùng hoặc cáp cắm sai chỗ được báo là xung đột để người kiểm tra.
 
 ### Chạy
 
@@ -521,6 +528,8 @@ npm run itsm:cmdb        # (nếu dùng iTop) đưa máy chủ từ NetBox vào 
 npm run start:dcim       # như npm start, đọc dcim/.env: hồ sơ lấy từ NetBox (làm mới mỗi phút)
 npm run start:all        # đọc cả itsm/.env và dcim/.env: ITSM + DCIM
 ```
+
+Chạy online cùng bản Render: `./itsm/tunnel.sh` mở cả iTop và NetBox qua một địa chỉ ngrok (NetBox ở `/netbox/`), rồi đặt `NETBOX_URL`, `DCIM_API_KEY`, `DCIM_API_TOKEN` trên Render. Xem [mục 13](#dùng-itsm-với-bản-trên-render-miễn-phí).
 
 Tab **Dung lượng** trên dashboard:
 
@@ -563,7 +572,7 @@ Kết thúc: tắt sự cố, đóng ticket trong iTop.
 | SLA thật trong iTop | Hạn SLA mới ghi trong nội dung ticket; chưa cấu hình hợp đồng, dịch vụ, SLA/SLT trong iTop |
 | Lớp CI cho thiết bị làm mát | iTop không có sẵn; CRAH, chiller, dây rò rỉ tạm dùng `Peripheral`. Làm đúng cần viết extension iTop |
 | ITSM trên Render | Gói miễn phí không chạy được iTop + MariaDB. Bản Render dùng iTop ở máy riêng qua đường hầm; máy đó phải bật khi demo |
-| NetBox trên Render | Bản Render dùng hồ sơ trong `config/dcim.json`. Muốn đọc NetBox thật từ Render cần mở NetBox qua đường hầm như iTop |
+| NetBox trên Render | Đọc được NetBox thật qua đường hầm chung với iTop (máy chạy NetBox phải bật); không đặt biến DCIM thì dùng `config/dcim.json` |
 | Cáp mạng, cổng switch trong DCIM | Mới làm chuỗi điện |
 | Đoạn MSB → UPS → tủ PDU trong NetBox | Chỉ ghi trong mô tả; NetBox không nối dây vào tủ phân phối |
 | 16 thiết bị hạ tầng lấy từ NetBox | Vẫn lấy từ `devices.json` vì cảnh báo gắn với mã Modbus; máy chủ và vị trí đã lấy từ NetBox |

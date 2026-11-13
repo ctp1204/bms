@@ -31,3 +31,11 @@ services:
         sync: false
       - key: ITSM_WARNING_HOLD_SEC
         value: "30"
+      # DCIM (tùy chọn): NetBox chạy ở máy riêng, đi chung đường hầm với iTop ở đường dẫn /netbox/.
+      # Để trống DCIM_API_KEY thì tab Dung lượng dùng config/dcim.json.
+      - key: NETBOX_URL
+        sync: false # <địa chỉ đường hầm>/netbox/, do itsm/tunnel.sh in ra
+      - key: DCIM_API_KEY
+        sync: false # giá trị trong dcim/.env
+      - key: DCIM_API_TOKEN
+        sync: false # giá trị trong dcim/.env
