@@ -82,8 +82,7 @@ function desiredDeviceTypes(dcim) {
   return out;
 }
 
-async function syncSkeleton(client, dcim, devices, log = () => {}) {
-  const s = new Syncer(client, log);
+async function syncSkeleton(client, dcim, devices, log = () => {}, s = new Syncer(client, log)) {
   const nb = dcim.netbox;
   const ids = { racks: {}, deviceTypes: {}, roles: {}, panels: {}, feeds: {} };
   const byId = Object.fromEntries(devices.map(d => [d.id, d]));
@@ -128,8 +127,10 @@ async function syncSkeleton(client, dcim, devices, log = () => {}) {
         { device_type: dt, name: `PSU${i}`, maximum_draw: t.ratedW, allocated_draw: Math.round(t.ratedW / t.psu) }, `  ${t.model} PSU${i}`);
     }
     if (t.outlets) {
+      // Không khai báo công suất cho cổng Input: để trống thì NetBox tự cộng tải của các máy cắm phía sau
+      // và hiện tỷ lệ dùng trên power feed. Định mức của thanh nguồn ghi trong mô tả loại thiết bị.
       const input = requireId(await s.ensure('dcim/power-port-templates/', { device_type_id: dt, name: 'Input' },
-        { device_type: dt, name: 'Input', maximum_draw: t.ratedW }, `  ${t.model} Input`), `${t.model} Input`);
+        { device_type: dt, name: 'Input', maximum_draw: null, allocated_draw: null }, `  ${t.model} Input`), `${t.model} Input`);
       for (let i = 1; i <= t.outlets; i++) {
         await s.ensure('dcim/power-outlet-templates/', { device_type_id: dt, name: `Outlet ${i}` },
           { device_type: dt, name: `Outlet ${i}`, power_port: input }, `  ${t.model} Outlet ${i}`);
@@ -161,4 +162,104 @@ async function syncSkeleton(client, dcim, devices, log = () => {}) {
   return { result: s.result, ids };
 }
 
-module.exports = { syncSkeleton, desiredDeviceTypes, Syncer, slugify, same };
+// Giai đoạn 3: thiết bị và cáp nguồn.
+// - 16 thiết bị hạ tầng: cảm biến rack là chính Rack, PDU sàn là tủ phân phối (đã có ở phần khung);
+//   còn lại là thiết bị đặt trong phòng, khóa asset_tag = keyPrefix + id.
+// - Mỗi rack hai thanh nguồn 0U: <R>-RPDU-A nhận feed A, <R>-RPDU-B nhận feed B.
+// - Máy chủ mẫu: PSU1 cắm thanh A, PSU2 cắm thanh B, cùng số ổ cắm (thứ tự máy trong rack).
+// NetBox tự tạo cổng nguồn của thiết bị theo cổng mẫu của loại thiết bị khi tạo thiết bị.
+// Cáp: chưa có thì tạo; đã nối đúng thì bỏ qua; nối sai chỗ thì báo xung đột, không gỡ cáp.
+async function syncDevices(client, dcim, devices, skel, log = () => {}, s = new Syncer(client, log)) {
+  const nb = dcim.netbox;
+  const { ids } = skel;
+  const tags = [ids.tag];
+  const byId = Object.fromEntries(devices.map(d => [d.id, d]));
+  ids.devices = {};
+  const base = { site: ids.site, location: ids.location, status: 'active', tags };
+
+  for (const d of devices) {
+    const m = dcim.infra[d.type];
+    if (!m || m.kind !== 'device') continue;
+    const name = loc(d.name, 'vi');
+    const nameJa = loc(d.name, 'ja');
+    ids.devices[d.id] = await s.ensure('dcim/devices/', { site_id: ids.site, asset_tag: `${nb.keyPrefix}${d.id}` }, {
+      ...base, name, device_type: ids.deviceTypes[d.type], role: ids.roles[m.role], asset_tag: `${nb.keyPrefix}${d.id}`,
+      description: `BMS · EPMS Demo: Modbus unit ${d.unit}${nameJa !== name ? ` · ${nameJa}` : ''}`,
+    }, `thiết bị ${name}`);
+  }
+
+  // Lấy một cổng nguồn / ổ cắm theo tên trên một thiết bị (NetBox tạo sẵn theo cổng mẫu).
+  const port = async (endpoint, device, name) => {
+    const [p] = await client.list(endpoint, { device_id: device, name });
+    if (!p) throw new Error(`Thiết bị #${device} không có ${name} (${endpoint}). Loại thiết bị thiếu cổng mẫu?`);
+    return p;
+  };
+  const cable = async (a, b, label) => {
+    const peersOk = (x, y) => Boolean(x.obj.cable) && x.obj.link_peers_type === y.type
+      && (x.obj.link_peers || []).some(p => p.id === y.obj.id);
+    if (!a.obj.cable && !b.obj.cable) {
+      const o = await client.create('dcim/cables/', {
+        a_terminations: [{ object_type: a.type, object_id: a.obj.id }],
+        b_terminations: [{ object_type: b.type, object_id: b.obj.id }],
+        status: 'connected', type: 'power', tags,
+      });
+      s.result.created.push({ endpoint: 'dcim/cables/', label, id: o.id });
+      log(`  nối cáp  ${label}`);
+    } else if (peersOk(a, b) && peersOk(b, a)) {
+      s.result.unchanged.push({ endpoint: 'dcim/cables/', label, id: a.obj.cable.id });
+    } else {
+      s.result.conflicts.push({ endpoint: 'dcim/cables/', label, ids: [a.obj.cable?.id, b.obj.cable?.id].filter(Boolean) });
+      log(`  XUNG ĐỘT cáp ${label}: một đầu đang nối chỗ khác. Không gỡ cáp, cần người kiểm tra.`);
+    }
+  };
+
+  for (const r of dcim.racks) {
+    const rack = ids.racks[r.rack];
+    if (rack === null) continue;
+    const R = `R${byId[r.rack].position}`;
+    const rpdu = {};
+    for (const { side } of dcim.power.feeds) {
+      const name = `${R}-RPDU-${side}`;
+      rpdu[side] = await s.ensure('dcim/devices/', { site_id: ids.site, name }, {
+        ...base, name, rack, device_type: ids.deviceTypes.rpdu, role: ids.roles['rack-pdu'],
+        description: `Thanh nguồn phía ${side} của rack ${R}`,
+      }, `thanh nguồn ${name}`);
+      ids.devices[name] = rpdu[side];
+      const feedId = ids.feeds[`${r.rack}:${side}`];
+      if (rpdu[side] === null || !feedId) continue;
+      // Cổng mẫu chỉ áp dụng khi tạo thiết bị, nên giữ cổng Input của thanh nguồn đã có cũng ở chế độ tự cộng tải.
+      const input = await port('dcim/power-ports/', rpdu[side], 'Input');
+      await s.ensure('dcim/power-ports/', { device_id: rpdu[side], name: 'Input' },
+        { device: rpdu[side], name: 'Input', maximum_draw: null, allocated_draw: null }, `  ${name} Input`);
+      const [feed] = await client.list('dcim/power-feeds/', { id: feedId });
+      await cable({ type: 'dcim.powerfeed', obj: feed }, { type: 'dcim.powerport', obj: input }, `feed ${R}-${side} → ${name} Input`);
+    }
+    for (const [i, d] of r.devices.entries()) {
+      const t = dcim.deviceTypes[d.type];
+      const id = await s.ensure('dcim/devices/', { site_id: ids.site, name: d.name }, {
+        ...base, name: d.name, rack, position: d.position, face: 'front',
+        device_type: ids.deviceTypes[d.type], role: ids.roles[t.role],
+        description: `Máy chủ mẫu (dữ liệu demo) · ${loc(t.name, 'vi')} · ${t.ratedKw} kW`,
+      }, `máy chủ ${d.name}`);
+      ids.devices[d.name] = id;
+      if (id === null) continue;
+      for (const [k, { side }] of dcim.power.feeds.entries()) {
+        if (rpdu[side] === null || k >= t.psu) continue;
+        const outlet = `Outlet ${i + 1}`;
+        await cable({ type: 'dcim.poweroutlet', obj: await port('dcim/power-outlets/', rpdu[side], outlet) },
+          { type: 'dcim.powerport', obj: await port('dcim/power-ports/', id, `PSU${k + 1}`) },
+          `${R}-RPDU-${side} ${outlet} → ${d.name} PSU${k + 1}`);
+      }
+    }
+  }
+  return { result: s.result, ids };
+}
+
+// Đồng bộ toàn bộ: khung rồi thiết bị, dùng chung một bảng kết quả.
+async function syncDcim(client, dcim, devices, log = () => {}) {
+  const s = new Syncer(client, log);
+  const skel = await syncSkeleton(client, dcim, devices, log, s);
+  return syncDevices(client, dcim, devices, skel, log, s);
+}
+
+module.exports = { syncDcim, syncSkeleton, syncDevices, desiredDeviceTypes, Syncer, slugify, same };

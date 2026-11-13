@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { NetboxClient } = require('../src/netbox');
-const { syncSkeleton } = require('../src/dcim-sync');
+const { syncDcim } = require('../src/dcim-sync');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -28,8 +28,8 @@ async function main() {
   const url = env.NETBOX_URL || (env.NETBOX_PORT ? `http://127.0.0.1:${env.NETBOX_PORT}/` : dcim.netbox.url);
   const client = new NetboxClient({ url, token: `nbt_${env.DCIM_API_KEY}.${env.DCIM_API_TOKEN}` });
 
-  console.log(`[dcim] Đồng bộ khung DCIM vào ${url}`);
-  const { result: r } = await syncSkeleton(client, dcim, devices, msg => console.log(msg));
+  console.log(`[dcim] Đồng bộ DCIM (khung, thiết bị, cáp nguồn) vào ${url}`);
+  const { result: r } = await syncDcim(client, dcim, devices, msg => console.log(msg));
   console.log(`[dcim] tạo ${r.created.length} · cập nhật ${r.updated.length} · không đổi ${r.unchanged.length} · xung đột ${r.conflicts.length}`);
   if (r.conflicts.length) process.exitCode = 2;
 }

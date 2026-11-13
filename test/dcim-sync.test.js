@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const path = require('path');
 const { NetboxClient, NetboxError } = require('../src/netbox');
-const { syncSkeleton, desiredDeviceTypes, slugify, same } = require('../src/dcim-sync');
+const { syncDcim, syncSkeleton, desiredDeviceTypes, slugify, same } = require('../src/dcim-sync');
 
 const dcim = require(path.join(__dirname, '../config/dcim.json'));
 const { devices } = require(path.join(__dirname, '../config/devices.json'));
@@ -12,8 +12,10 @@ const TOKEN = 'nbt_abcdefghijkl.0123456789012345678901234567890123456789';
 
 // NetBox giả: lưu đối tượng theo endpoint, trả về đúng "hình dạng" của NetBox
 // (khóa ngoại thành {id}, trường chọn thành {value,label}), lọc theo query, có phân trang.
-const FK = new Set(['site', 'location', 'manufacturer', 'device_type', 'role', 'power_panel', 'rack', 'power_port']);
-const CHOICE = new Set(['status', 'type', 'supply', 'phase', 'form_factor', 'width']);
+// Giống NetBox: tạo thiết bị thì tự tạo cổng nguồn/ổ cắm theo cổng mẫu; tạo cáp thì ghi cable/link_peers lên hai đầu.
+const FK = new Set(['site', 'location', 'manufacturer', 'device_type', 'role', 'power_panel', 'rack', 'power_port', 'device']);
+const TERM_EP = { 'dcim.powerfeed': 'dcim/power-feeds/', 'dcim.powerport': 'dcim/power-ports/', 'dcim.poweroutlet': 'dcim/power-outlets/' };
+const CHOICE = new Set(['status', 'type', 'supply', 'phase', 'form_factor', 'width', 'face']);
 function fakeNetbox({ token = TOKEN, failOn } = {}) {
   const db = { store: {}, seq: 0, calls: [] };
   const shape = (fields, base = {}) => {
@@ -57,7 +59,26 @@ function fakeNetbox({ token = TOKEN, failOn } = {}) {
       const fields = JSON.parse(body);
       if (req.method === 'POST') {
         const o = shape(fields, { id: ++db.seq });
+        if (ep === 'dcim/cables/') {
+          const [a] = fields.a_terminations;
+          const [b] = fields.b_terminations;
+          const end = t => db.store[TERM_EP[t.object_type]].find(x => x.id === t.object_id);
+          const [ea, eb] = [end(a), end(b)];
+          if (ea.cable || eb.cable) return send(400, { __all__: ['termination already cabled'] });
+          Object.assign(ea, { cable: { id: o.id }, link_peers_type: b.object_type, link_peers: [{ id: b.object_id }] });
+          Object.assign(eb, { cable: { id: o.id }, link_peers_type: a.object_type, link_peers: [{ id: a.object_id }] });
+        }
         list.push(o);
+        if (ep === 'dcim/devices/') {
+          const comp = (tplEp, outEp, extra) => (db.store[tplEp] || []).filter(t => t.device_type.id === fields.device_type)
+            .map(t => { const c = { id: ++db.seq, device: { id: o.id }, name: t.name, cable: null, link_peers: [], link_peers_type: null, ...extra(t) };
+              (db.store[outEp] || (db.store[outEp] = [])).push(c); return c; });
+          const ports = comp('dcim/power-port-templates/', 'dcim/power-ports/', t => ({ maximum_draw: t.maximum_draw, allocated_draw: t.allocated_draw }));
+          comp('dcim/power-outlet-templates/', 'dcim/power-outlets/', t => {
+            const tpl = db.store['dcim/power-port-templates/'].find(p => p.id === t.power_port.id);
+            return { power_port: { id: ports.find(p => p.name === tpl.name).id } };
+          });
+        }
         return send(201, o);
       }
       if (req.method === 'PATCH') {
@@ -189,4 +210,84 @@ test('client errors carry HTTP code and NetBox field details', async () => {
   const dead = new NetboxClient({ url: 'http://127.0.0.1:1/', token: TOKEN });
   await assert.rejects(dead.list('dcim/sites/'), e => e.code === 'NETWORK');
   assert.throws(() => new NetboxClient({ url: 'http://x/' }), /cần url và token/);
+});
+
+test('full sync places infra devices, rack PDUs and sample servers, and wires PSU1→A, PSU2→B', async () => {
+  await withNetbox({}, async (url, db) => {
+    const client = new NetboxClient({ url, token: TOKEN });
+    const { result, ids } = await syncDcim(client, dcim, devices);
+    assert.equal(result.conflicts.length, 0);
+    const devs = db.store['dcim/devices/'];
+    const servers = dcim.racks.flatMap(r => r.devices);
+    const infra = devices.filter(d => dcim.infra[d.type].kind === 'device');
+    assert.equal(devs.length, infra.length + dcim.racks.length * 2 + servers.length);
+    assert.equal(db.store['dcim/cables/'].length, dcim.racks.length * 2 + servers.length * 2);
+
+    const ups = devs.find(d => d.asset_tag === 'bms:ups1');
+    assert.equal(ups.name, 'UPS-1');
+    assert.equal(ups.rack, undefined, 'infra devices stand in the room, not in a rack');
+    assert.equal(ups.role.id, ids.roles.ups);
+
+    const byId = id => devs.find(d => d.id === id);
+    const peerOf = (ep, devId, name) => {
+      const c = db.store[ep].find(x => x.device.id === devId && x.name === name);
+      return { c, peer: db.store[TERM_EP[c.link_peers_type]].find(x => x.id === c.link_peers[0].id) };
+    };
+    const gpu = devs.find(d => d.name === 'R4-GPU8-2'); // máy thứ 2 trong R4 → Outlet 2
+    assert.equal(gpu.position, 9);
+    assert.equal(gpu.face.value, 'front');
+    for (const [psu, side] of [['PSU1', 'A'], ['PSU2', 'B']]) {
+      const { peer } = peerOf('dcim/power-ports/', gpu.id, psu);
+      assert.equal(peer.name, 'Outlet 2');
+      assert.equal(byId(peer.device.id).name, `R4-RPDU-${side}`);
+    }
+    const { c: input, peer: feed } = peerOf('dcim/power-ports/', ids.devices['R4-RPDU-B'], 'Input');
+    assert.equal(feed.name, 'R4-B');
+    assert.equal(input.maximum_draw, null, 'rack PDU input aggregates downstream draw in NetBox');
+  });
+});
+
+test('second full sync writes nothing', async () => {
+  await withNetbox({}, async (url, db) => {
+    const client = new NetboxClient({ url, token: TOKEN });
+    await syncDcim(client, dcim, devices);
+    const writes = () => db.calls.filter(c => !c.startsWith('GET')).length;
+    const before = writes();
+    const { result } = await syncDcim(client, dcim, devices);
+    assert.equal(result.created.length + result.updated.length + result.conflicts.length, 0);
+    assert.equal(writes(), before);
+  });
+});
+
+test('a cable plugged into the wrong outlet is a conflict, never unplugged', async () => {
+  await withNetbox({}, async (url, db) => {
+    const client = new NetboxClient({ url, token: TOKEN });
+    const { ids } = await syncDcim(client, dcim, devices);
+    // Đổi đầu ổ cắm của cáp vào R6-CMP-1 PSU1 sang Outlet 20 (ai đó cắm lại bằng tay)
+    const ports = db.store['dcim/power-ports/'];
+    const outlets = db.store['dcim/power-outlets/'];
+    const psu = ports.find(p => p.device.id === ids.devices['R6-CMP-1'] && p.name === 'PSU1');
+    const old = outlets.find(o => o.id === psu.link_peers[0].id);
+    const moved = outlets.find(o => o.device.id === ids.devices['R6-RPDU-A'] && o.name === 'Outlet 20');
+    Object.assign(moved, { cable: old.cable, link_peers_type: 'dcim.powerport', link_peers: [{ id: psu.id }] });
+    Object.assign(old, { cable: null, link_peers_type: null, link_peers: [] });
+    psu.link_peers = [{ id: moved.id }];
+    const lines = [];
+    const { result } = await syncDcim(client, dcim, devices, m => lines.push(m));
+    assert.deepEqual(result.conflicts.map(c => c.label), ['R6-RPDU-A Outlet 1 → R6-CMP-1 PSU1']);
+    assert.ok(lines.some(l => l.includes('XUNG ĐỘT cáp')));
+    assert.equal(result.created.length, 0, 'no second cable is added to the PSU');
+    assert.ok(!db.calls.some(c => c.startsWith('DELETE')));
+  });
+});
+
+test('a missing component template fails with a clear message', async () => {
+  await withNetbox({}, async (url, db) => {
+    const client = new NetboxClient({ url, token: TOKEN });
+    const skel = await syncSkeleton(client, dcim, devices);
+    db.store['dcim/power-port-templates/'] = db.store['dcim/power-port-templates/'].filter(t => t.name !== 'Input');
+    db.store['dcim/power-outlet-templates/'] = [];
+    const { syncDevices } = require('../src/dcim-sync');
+    await assert.rejects(syncDevices(client, dcim, devices, skel), /không có Input .*cổng mẫu/);
+  });
 });
