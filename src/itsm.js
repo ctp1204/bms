@@ -5,6 +5,8 @@
 // - Cảnh báo warning chỉ mở ticket nếu còn sau warningHoldSec; nếu nhóm đã có ticket thì ghi chú ngay.
 // - Mọi lệnh gửi iTop đi qua một hàng đợi tuần tự, lưu xuống đĩa. iTop lỗi đường truyền thì thử lại,
 //   bộ cảnh báo không bao giờ phải chờ iTop.
+// - Tùy chọn impact(alarm): trả về { vi: [dòng], ja: [dòng], cis: [mã CI] } để ghi thêm phần "ảnh hưởng"
+//   vào ticket và gắn thêm CI (vd. máy chủ chỉ còn một nguồn khi mất PDU, lấy từ DCIM). Trả null nếu không liên quan.
 
 const fs = require('fs');
 const { EventEmitter } = require('events');
@@ -32,14 +34,14 @@ const TX = {
     raised: 'Phát sinh thêm', cleared: 'Đã hết', acked: 'Đã xác nhận trên NOC bởi {user}', info: 'Thông tin',
     allCleared: 'Tất cả cảnh báo trong nhóm đã hết. Chờ người trực kiểm tra và đóng ticket.',
     escalated: 'Nâng ưu tiên lên {p}', group: 'Nhóm sự cố', team: 'Nhóm xử lý', priority: 'Ưu tiên',
-    sla: 'SLA demo: phản hồi {tto}, xử lý {ttr}', alarms: 'Cảnh báo', prev: 'Tiếp nối ticket {ref} đã đóng.',
+    sla: 'SLA demo: phản hồi {tto}, xử lý {ttr}', alarms: 'Cảnh báo', prev: 'Tiếp nối ticket {ref} đã đóng.', impact: 'Ảnh hưởng',
     footer: 'Tạo tự động bởi BMS · EPMS Demo. Ticket không tự đóng.', min: 'phút', hour: 'giờ', day: 'ngày',
   },
   ja: {
     raised: '追加発生', cleared: '復旧', acked: 'NOC で {user} が確認', info: '情報',
     allCleared: 'グループ内のアラームはすべて復旧しました。担当者が確認してチケットをクローズしてください。',
     escalated: '優先度を {p} に引き上げ', group: '障害グループ', team: '担当チーム', priority: '優先度',
-    sla: 'SLA（デモ）：応答 {tto}、解決 {ttr}', alarms: 'アラーム', prev: 'クローズ済みチケット {ref} の続き。',
+    sla: 'SLA（デモ）：応答 {tto}、解決 {ttr}', alarms: 'アラーム', prev: 'クローズ済みチケット {ref} の続き。', impact: '影響',
     footer: 'BMS · EPMS Demo が自動作成。チケットは自動でクローズされません。', min: '分', hour: '時間', day: '日',
   },
 };
@@ -53,9 +55,10 @@ const duration = (min, lang) => {
 
 class ItsmConnector extends EventEmitter {
   constructor({ client, config, devices = [], statePath = null, holdSec, nocUrl = '', itopUrl = '',
-    timeZone = 'Asia/Ho_Chi_Minh', clock = Date.now, log = () => {} }) {
+    timeZone = 'Asia/Ho_Chi_Minh', clock = Date.now, log = () => {}, impact = null }) {
     super();
     this.client = client;
+    this.impact = impact;
     this.cfg = config;
     this.clock = clock;
     this.log = log;
@@ -103,14 +106,18 @@ class ItsmConnector extends EventEmitter {
       g.active[a.key] = {
         ruleId: a.ruleId, severity: a.severity, priority: m.priority, raisedAt: now,
         deviceId: a.deviceId, point: a.point, value: a.value, messages: a.messages || a.message,
+        impact: this._impactOf(a),
       };
       if (open) {
         const up = RANK[m.priority] < RANK[g.priority] ? m.priority : null;
         if (up) g.priority = up;
-        const ciAdded = this._addCi(g, a.deviceId);
+        const imp = g.active[a.key].impact;
+        let ciAdded = this._addCi(g, a.deviceId);
+        if (imp) for (const id of imp.cis) ciAdded = this._addCi(g, id, true) || ciAdded;
         g.linked[a.key] = true;
         this._queue('note', g, {
-          kind: 'raised', text: this._text('raised', a, now) + (up ? `\n${fill(TX.vi.escalated, { p: up })} · ${fill(TX.ja.escalated, { p: up })}` : ''),
+          kind: 'raised', text: this._text('raised', a, now) + (up ? `\n${fill(TX.vi.escalated, { p: up })} · ${fill(TX.ja.escalated, { p: up })}` : '')
+            + (imp ? `\n${TX.vi.impact}:\n${imp.vi.join('\n')}\n${TX.ja.impact}：\n${imp.ja.join('\n')}` : ''),
           priority: up, cis: ciAdded ? [...g.cis] : null,
         });
       } else {
@@ -173,10 +180,27 @@ class ItsmConnector extends EventEmitter {
     return g.lastClearedAt !== null && now - g.lastClearedAt < this.windowMs;
   }
 
-  _addCi(g, deviceId) {
-    if (!this.knownDevices.has(deviceId) || g.cis.includes(deviceId)) return false;
+  // extra = CI đến từ phần ảnh hưởng (vd. máy chủ trong DCIM), không có trong devices.json
+  _addCi(g, deviceId, extra = false) {
+    if ((!extra && !this.knownDevices.has(deviceId)) || g.cis.includes(deviceId)) return false;
     g.cis.push(deviceId);
     return true;
+  }
+
+  _addImpactCis(g, list) {
+    for (const x of list) if (x.impact) for (const id of x.impact.cis) this._addCi(g, id, true);
+  }
+
+  // Lỗi trong hook ảnh hưởng không được làm mất ticket
+  _impactOf(a) {
+    if (!this.impact) return null;
+    try {
+      const r = this.impact(a);
+      return r && Array.isArray(r.vi) && Array.isArray(r.ja) ? { vi: r.vi, ja: r.ja, cis: r.cis || [] } : null;
+    } catch (e) {
+      this.log(`Bỏ qua phần ảnh hưởng (${e.message})`);
+      return null;
+    }
   }
 
   _maybeOpen(g, now) {
@@ -194,6 +218,7 @@ class ItsmConnector extends EventEmitter {
       this._addCi(g, x.deviceId);
       g.linked[k] = true;
     }
+    this._addImpactCis(g, list.map(([, x]) => x));
     g.priority = list.map(([, x]) => x.priority).sort((p, q) => RANK[p] - RANK[q])[0];
     this._queue('open', g, this._openPayload(g, list.map(([, x]) => x)));
   }
@@ -232,6 +257,7 @@ class ItsmConnector extends EventEmitter {
       return `<p><b>${t.group}:</b> ${esc(def.name[lang])} · <b>${t.team}:</b> ${esc(team[lang])} · `
         + `<b>${t.priority}:</b> ${g.priority} ${esc(pr.name[lang])} (${esc(sla)})</p>`
         + `<p><b>${t.alarms}:</b></p><ul>${items}</ul>`
+        + alarms.filter(x => x.impact).map(x => `<p><b>${t.impact}:</b></p><ul>${x.impact[lang].map(l => `<li>${esc(l)}</li>`).join('')}</ul>`).join('')
         + (g.prevRef ? `<p>${esc(fill(t.prev, { ref: g.prevRef }))}</p>` : '');
     };
     const view = VIEW_BY_TEAM[def.team] || 'overview';
@@ -321,6 +347,7 @@ class ItsmConnector extends EventEmitter {
         g.prevRef = g.ticket.ref;
         g.cis = [];
         for (const x of list) this._addCi(g, x.deviceId);
+        this._addImpactCis(g, list);
         g.priority = list.map(x => x.priority).sort((p, q) => RANK[p] - RANK[q])[0];
         g.linked = Object.fromEntries(Object.keys(g.active).map(k => [k, true]));
         g.lastClearedAt = null;
@@ -330,7 +357,15 @@ class ItsmConnector extends EventEmitter {
     const fields = { public_log: { add_item: { message: job.text, format: 'text' } } };
     if (job.priority) Object.assign(fields, this._priorityFields(job.priority));
     if (job.cis) fields.functionalcis_list = this._ciLinks(job.cis); // ghi đè cả danh sách, nên gửi đủ CI
-    await this.client.update('Incident', g.ticket.key, fields, { comment: 'bms-itsm' });
+    try {
+      await this.client.update('Incident', g.ticket.key, fields, { comment: 'bms-itsm' });
+    } catch (e) {
+      if (retryable(e) || !job.cis) throw e;
+      // Giống lúc tạo ticket: CI chưa có trong CMDB thì vẫn ghi chú, chỉ không gắn CI.
+      this.log(`Không gắn được CI (${e.message}). Ghi chú không kèm CI; chạy npm run itsm:cmdb để đồng bộ CMDB.`);
+      delete fields.functionalcis_list;
+      await this.client.update('Incident', g.ticket.key, fields, { comment: 'bms-itsm' });
+    }
   }
 
   _priorityFields(p) {

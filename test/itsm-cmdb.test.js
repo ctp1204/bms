@@ -33,6 +33,11 @@ function fakeItop({ user = 'u', password = 'p', status = 200, delayMs = 0 } = {}
         const g = { ...f };
         if (f.org_id) { g.org_id_friendlyname = nameIn(f.org_id); delete g.org_id; }
         if (f.location_id) { g.location_id_friendlyname = nameIn(f.location_id); delete g.location_id; }
+        if (f.rack_id) {
+          const asset = (f.rack_id.match(/asset_number = '([^']*)'/) || [])[1];
+          g.rack_id_friendlyname = (db.objects.find(o => o.fields.asset_number === asset) || { fields: {} }).fields.name;
+          delete g.rack_id;
+        }
         return g;
       };
       if (j.operation === 'core/create') {
@@ -108,6 +113,37 @@ test('sync reports extra and wrong-class CIs instead of deleting or recreating t
     assert.equal(db.objects.length, devices.length);
     assert.ok(!db.calls.includes('core/delete'));
   });
+});
+
+const { inventoryFromConfig } = require('../src/dcim-capacity');
+const dcim = require(path.join(__dirname, '../config/dcim.json'));
+const servers = inventoryFromConfig(dcim, devices).racks.flatMap(r => r.devices.map(d => ({ name: d.name, rack: r.id, type: d.type, ratedKw: d.ratedKw })));
+
+test('servers from DCIM become Server CIs placed in their iTop rack, idempotently', async () => {
+  await withItop({}, async (url, db) => {
+    const client = new ItopClient({ url, user: 'u', password: 'p' });
+    const first = await syncCmdb(client, devices, itsm, () => {}, servers);
+    assert.equal(first.created.length, devices.length + servers.length);
+    const r4 = db.objects.find(o => o.fields.asset_number === 'bms:R4-GPU8-1');
+    assert.equal(r4.class, 'Server');
+    assert.equal(r4.fields.rack_id_friendlyname, 'Rack R4');
+    assert.equal(r4.fields.business_criticity, 'high');
+    assert.match(r4.fields.description, /gpu8 · 10.2 kW/);
+
+    const second = await syncCmdb(client, devices, itsm, () => {}, servers);
+    assert.equal(second.created.length + second.updated.length, 0);
+
+    const moved = servers.map(x => (x.name === 'R6-CMP-1' ? { ...x, rack: 'rack5' } : x));
+    const third = await syncCmdb(client, devices, itsm, () => {}, moved);
+    assert.deepEqual(third.updated.map(u => [u.deviceId, u.fields]), [['R6-CMP-1', ['rack_id']]]);
+    assert.equal(db.objects.find(o => o.fields.asset_number === 'bms:R6-CMP-1').fields.rack_id_friendlyname, 'Rack R5');
+
+    const lines = [];
+    const fourth = await syncCmdb(client, devices, itsm, m => lines.push(m), moved.filter(x => x.name !== 'R6-SW-1'));
+    assert.deepEqual(fourth.extra.map(e => e.assetNumber), ['bms:R6-SW-1'], 'a server removed from DCIM is reported, never deleted');
+    assert.ok(lines.some(l => l.includes('DCIM')));
+  });
+  assert.throws(() => desiredCis(devices, itsm, [{ name: 'X', rack: 'rack9', type: 'gpu8', ratedKw: 1 }]), /rack rack9 không có/);
 });
 
 test('client turns iTop and transport failures into ItopError', async () => {

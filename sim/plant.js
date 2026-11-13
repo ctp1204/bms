@@ -43,7 +43,14 @@ const GEN_START_S = 10; // thời gian máy phát khởi động tới lúc nh�
 const RETRANSFER_S = 15; // điện lưới phải ổn định bấy lâu mới chuyển về
 const GEN_COOLDOWN_S = 30; // máy phát chạy không tải sau khi chuyển về lưới
 const CHILLER_RESTART_S = 30; // chiller chờ khởi động lại sau khi có điện
-const RACK_WEIGHTS = [0.15, 0.16, 0.17, 0.2, 0.17, 0.15]; // tỷ lệ tải IT theo rack
+// Tỷ lệ tải IT theo rack R1–R6, chia theo tổng công suất định mức của máy chủ mẫu trong config/dcim.json,
+// để số đo trên PDU khớp với hồ sơ DCIM (R4 gần hết ngân sách điện, R6 gần trống). Tổng tải IT không đổi.
+const rackWeights = dcim => {
+  const kw = dcim.racks.map(r => r.devices.reduce((s, d) => s + dcim.deviceTypes[d.type].ratedKw, 0));
+  const total = kw.reduce((s, x) => s + x, 0);
+  return kw.map(x => x / total);
+};
+const RACK_WEIGHTS = rackWeights(require('../config/dcim.json'));
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const enc = (v, scale = 1) => Math.round(v * scale) & 0xffff;
@@ -285,4 +292,4 @@ class Plant {
   }
 }
 
-module.exports = { Plant, FAULTS, FAULT_DOMAIN, UNIT, SETPOINT, SRC, GEN, UPS };
+module.exports = { Plant, FAULTS, FAULT_DOMAIN, UNIT, SETPOINT, SRC, GEN, UPS, RACK_WEIGHTS, rackWeights };

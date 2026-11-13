@@ -9,7 +9,10 @@
     "sim": "node sim/index.js",
     "bms": "node src/index.js",
     "start:itsm": "node --env-file=itsm/.env scripts/start.js",
+    "start:dcim": "node --env-file=dcim/.env scripts/start.js",
+    "start:all": "node --env-file=itsm/.env --env-file=dcim/.env scripts/start.js",
     "itsm:cmdb": "node scripts/itsm-cmdb-sync.js",
+    "dcim:sync": "node scripts/dcim-sync.js",
     "test": "node --test test/",
     "check": "for f in src/*.js sim/*.js scripts/*.js public/*.js; do node --check \"$f\" || exit 1; done && echo 'syntax OK'"
   }

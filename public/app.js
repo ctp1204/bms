@@ -1,12 +1,12 @@
 'use strict';
 /* global document, window, fetch, EventSource, location, getComputedStyle, localStorage, navigator, I18N */
 
-const S = { cfg: null, meta: {}, devDomain: {}, snap: null, tab: 'active', view: 'overview', simUrl: '', sigs: {}, lang: 'vi' };
+const S = { cfg: null, meta: {}, devDomain: {}, snap: null, tab: 'active', view: 'overview', simUrl: '', sigs: {}, lang: 'vi', cap: null, plan: null, planType: null };
 const $ = sel => document.querySelector(sel);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const val = id => (S.snap ? S.snap.values[id] : undefined);
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const VIEWS = ['overview', 'cooling', 'power'];
+const VIEWS = ['overview', 'cooling', 'power', 'capacity'];
 
 /* ---------- Ngôn ngữ ---------- */
 const LANGS = Object.keys(I18N);
@@ -58,8 +58,11 @@ function setLang(lang) {
   buildFloor();
   buildOneLine();
   buildTrendSelect();
+  buildPlanForm();
   S.sigs = {};
   render();
+  renderCapacity();
+  renderPlan();
   loadTrend();
   loadFaults();
   if (S.tab === 'log') loadEvents();
@@ -71,6 +74,7 @@ function showView(view) {
   document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === S.view)));
   document.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== S.view; });
   if (S.view === 'overview') loadTrend();
+  if (S.view === 'capacity') loadCapacity();
 }
 
 /* ---------- Định dạng giá trị ---------- */
@@ -462,6 +466,136 @@ async function loadFaults(method = 'GET', body) {
   }
 }
 
+/* ---------- Dung lượng (DCIM) ---------- */
+// Dữ liệu lấy từ /api/dcim/capacity (hồ sơ NetBox hoặc config + số đo EPMS/BMS), làm mới khi tab đang mở.
+const LEVEL_CLS = { ok: 'ok', warn: 'warn', crit: 'crit', unknown: 'off' };
+const EL = { uh: 10, rw: 132, gap: 22, x0: 34, top: 74 };
+
+function typeName(key) {
+  const tp = (S.cfg.dcim.types || []).find(x => x.key === key);
+  return tp ? L(tp.name) : key;
+}
+
+function renderCapacity() {
+  const c = S.cap;
+  if (!c) return;
+  const src = c.netboxUrl && c.source === 'netbox'
+    ? `${esc(t('cap.source'))} <a href="${esc(c.netboxUrl)}dcim/racks/" target="_blank" rel="noopener noreferrer">NetBox ↗</a>`
+    : `${esc(t('cap.source'))} ${esc(c.sourceName)}${c.sourceError ? ` · <span class="warn-text">${esc(t('cap.sourceError'))}</span>` : ''}`;
+  $('#cap-source').innerHTML = src;
+  $('#cap-source').title = c.sourceError || '';
+
+  // Sơ đồ rack: mỗi cột một rack 42U, U1 ở dưới. Trên đầu: thanh điện (đo / ngân sách) và nhiệt độ inlet.
+  const uMax = Math.max(...c.racks.map(r => r.u.total));
+  const H = EL.top + uMax * EL.uh + 30;
+  const plan = S.plan && S.plan.best ? S.plan : null;
+  let svg = '';
+  c.racks.forEach((r, i) => {
+    const x = EL.x0 + i * (EL.rw + EL.gap);
+    const yU = u => EL.top + (r.u.total - u + 1) * EL.uh - EL.uh; // đỉnh của ô U thứ u
+    const pct = Math.min(100, r.power.pct ?? 0);
+    const rackLink = c.netboxUrl ? `${c.netboxUrl}dcim/racks/?facility_id=${encodeURIComponent(`bms:${r.id}`)}` : null;
+    const title = `<text class="rt" x="${x}" y="16">${esc(r.name)}</text>`;
+    svg += rackLink ? `<a href="${esc(rackLink)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
+    svg += `<text class="rv" x="${x + EL.rw}" y="16" text-anchor="end">${r.thermal.inletC === null ? '—' : `${num(r.thermal.inletC)}°C`}</text>
+      <rect class="bar-bg" x="${x}" y="26" width="${EL.rw}" height="10" rx="3"/>
+      <rect class="bar ${LEVEL_CLS[r.power.level]}" x="${x}" y="26" width="${(EL.rw * pct) / 100}" height="10" rx="3"/>
+      <text class="rl" x="${x}" y="52">${esc(t('cap.kwOf', { v: num(r.power.measuredKw ?? r.power.ratedKw), b: num(r.power.budgetKw, 0) }))}</text>
+      <text class="rl" x="${x}" y="66">${esc(t('cap.uFree', { n: r.u.free }))}</text>
+      <rect class="frame ${r.level === 'crit' ? 'crit' : ''}" x="${x - 4}" y="${EL.top - 4}" width="${EL.rw + 8}" height="${r.u.total * EL.uh + 8}" rx="4"/>`;
+    for (const d of r.devices) {
+      const y = yU(d.position + d.u - 1);
+      const h = d.u * EL.uh - 1;
+      svg += `<g><title>${esc(`${d.name} · ${typeName(d.type)} · ${num(d.ratedKw)} kW · U${d.position}`)}</title>
+        <rect class="dev d-${esc(d.type)}" x="${x}" y="${y}" width="${EL.rw}" height="${h}" rx="2"/>
+        ${h >= 9 ? `<text class="dl d-${esc(d.type)}" x="${x + 5}" y="${y + Math.min(h, 20) / 2 + 4}">${esc(d.name)}${d.u >= 2 ? ` · ${num(d.ratedKw)} kW` : ''}</text>` : ''}</g>`;
+    }
+    // Chỗ đặt dự kiến của công cụ "lắp vào đâu": khoảng trống thấp nhất đủ chỗ trong rack được chọn
+    if (plan && plan.best === r.id) {
+      let left = plan.request.count;
+      for (const b of r.u.blocks) {
+        for (let pos = b.start; left > 0 && pos + plan.request.u - 1 < b.start + b.size; pos += plan.request.u, left--) {
+          const y = yU(pos + plan.request.u - 1);
+          svg += `<rect class="ghost" x="${x}" y="${y}" width="${EL.rw}" height="${plan.request.u * EL.uh - 1}" rx="2"/>
+            <text class="gl" x="${x + 5}" y="${y + 14}">${esc(t('plan.here'))}</text>`;
+        }
+      }
+    }
+  });
+  for (let u = 1; u <= uMax; u += 10) {
+    svg += `<text class="ul" x="${EL.x0 - 8}" y="${EL.top + (uMax - u) * EL.uh + 8}" text-anchor="end">${u}</text>`;
+  }
+  const W = EL.x0 + c.racks.length * (EL.rw + EL.gap);
+  $('#elev').setAttribute('viewBox', `0 0 ${W} ${H}`);
+  $('#elev').innerHTML = svg;
+
+  // PDU sàn so với ngưỡng 2N
+  $('#cap-floor').innerHTML = c.floor.map(f => {
+    const pct = f.measuredKw === null ? 0 : Math.min(100, (f.measuredKw / f.ratedKw) * 100);
+    const limit = (f.redundancyLimitKw / f.ratedKw) * 100;
+    const note = f.inputLost ? t('cap.inputLost') : f.measuredKw === null ? '—'
+      : f.headroomTo2nKw >= 0 ? t('cap.to2n', { v: num(f.headroomTo2nKw) }) : t('cap.over2n', { v: num(-f.headroomTo2nKw) });
+    return `<div class="pdu-row"><b>PDU-${esc(f.side)}</b>
+      <div class="meter"><span class="fill ${LEVEL_CLS[f.level]}" style="width:${pct}%"></span><span class="mark" style="left:${limit}%" title="2N"></span></div>
+      <span>${num(f.measuredKw)} / ${num(f.ratedKw, 0)} kW</span><span class="muted small">${esc(note)}</span></div>`;
+  }).join('');
+
+  // Bảng dung lượng
+  const lvl = l => `<span class="pill lv-${LEVEL_CLS[l]}">${esc(t(`cap.level.${l}`))}</span>`;
+  $('#cap-table').innerHTML = `<thead><tr><th>${esc(t('pdu.rack'))}</th><th>${esc(t('cap.colU'))}</th><th>${esc(t('cap.colRated'))}</th>
+    <th>${esc(t('cap.colMeasured'))}</th><th>${esc(t('cap.colHeadroom'))}</th><th>${esc(t('cap.colInlet'))}</th><th>${esc(t('cap.colLevel'))}</th></tr></thead>
+    <tbody>${c.racks.map(r => `<tr><td><b>${esc(r.name)}</b></td>
+      <td>${r.u.free} / ${r.u.total} <span class="muted small">(${esc(t('cap.largest', { n: r.u.largestFree }))})</span></td>
+      <td>${num(r.power.ratedKw)} kW</td><td>${num(r.power.measuredKw)} kW <span class="muted small">${r.power.pct ?? '—'}%</span></td>
+      <td><b>${num(r.power.headroomKw)} kW</b></td><td>${r.thermal.inletC === null ? '—' : `${num(r.thermal.inletC)}°C`}</td><td>${lvl(r.level)}</td></tr>`).join('')}
+    <tr class="sum"><td><b>${esc(t('pdu.total'))}</b></td><td>${c.totals.freeU}</td><td>${num(c.totals.ratedKw)} kW</td><td>${num(c.totals.measuredKw)} kW</td><td></td><td></td><td></td></tr></tbody>`;
+}
+
+function renderPlan() {
+  const p = S.plan;
+  const box = $('#plan-result');
+  if (!p) { box.innerHTML = `<p class="muted small">${esc(t('plan.hint'))}</p>`; return; }
+  const rackName = id => (S.cap.racks.find(r => r.id === id) || {}).name || id;
+  const reason = r => ({
+    space: t('plan.r.space', { need: r.need, free: r.largestFree }),
+    power: t('plan.r.power', { need: num(r.needKw), have: num(r.headroomKw) }),
+    thermal: t('plan.r.thermal', { v: num(r.inletC), w: num(r.warnC, 0) }),
+  })[r.code];
+  const verdict = p.best
+    ? `<p class="verdict ok">${esc(t('plan.best', { rack: rackName(p.best), n: p.request.count, type: typeName(S.planType) }))}</p>`
+    : `<p class="verdict crit">${esc(t('plan.none'))}</p>`;
+  const twoN = p.floor.some(f => f.afterKw === null) ? ''
+    : `<p class="verdict ${p.keeps2n ? 'ok' : 'warn'}">${esc(t(p.keeps2n ? 'plan.keeps2n' : 'plan.breaks2n', {
+      v: p.floor.map(f => `PDU-${f.side} ${num(f.afterKw)} kW`).join(', '), l: num(p.floor[0].limitKw, 0) }))}</p>`;
+  box.innerHTML = `${verdict}${twoN}<ul class="cands">${p.candidates.map(cd => `<li class="${cd.fits ? 'fit' : 'nofit'}">
+    <b>${esc(cd.name)}</b> ${cd.fits ? esc(t('plan.fits', { v: num(cd.headroomAfterKw) })) : esc(cd.reasons.map(reason).join(' · '))}</li>`).join('')}</ul>`;
+}
+
+async function loadCapacity() {
+  if (S.view !== 'capacity' || !S.cfg) return;
+  try {
+    S.cap = await (await fetch('/api/dcim/capacity')).json();
+    renderCapacity();
+  } catch { /* mất kết nối tạm thời: giữ dữ liệu cũ */ }
+}
+
+async function runPlan() {
+  S.planType = $('#plan-type').value;
+  const count = Math.max(1, Math.min(10, Number($('#plan-count').value) || 1));
+  S.plan = await (await fetch(`/api/dcim/plan?type=${encodeURIComponent(S.planType)}&count=${count}`)).json();
+  await loadCapacity();
+  renderPlan();
+}
+
+function buildPlanForm() {
+  const sel = $('#plan-type');
+  const cur = sel.value || 'gpu8';
+  sel.innerHTML = (S.cfg.dcim.types || []).map(x => `<option value="${esc(x.key)}">${esc(t('plan.typeOpt', { name: L(x.name), u: x.u, kw: num(x.ratedKw) }))}</option>`).join('');
+  sel.value = cur;
+  $('#cap-legend').innerHTML = (S.cfg.dcim.types || []).map(x => `<span><i class="sw d-${esc(x.key)}"></i>${esc(L(x.name))}</span>`).join('')
+    + `<span><i class="sw ghost-sw"></i>${esc(t('plan.here'))}</span>`;
+}
+
 /* ---------- Khởi động ---------- */
 function render() {
   if (!S.snap || !S.snap.values) return;
@@ -490,10 +624,11 @@ async function init() {
   }
   for (const p of S.cfg.derived) S.meta[p.id] = { name: p.name, uom: p.uom, decimals: p.decimals, domain: p.domain };
   applyStatic();
-  buildFloor(); buildOneLine(); buildTrendSelect();
+  buildFloor(); buildOneLine(); buildTrendSelect(); buildPlanForm(); renderPlan();
   showView(location.hash.slice(1));
   connect(); loadFaults();
   setInterval(loadTrend, 5000);
+  setInterval(loadCapacity, 5000);
   setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString(t('locale'), { hour12: false }); }, 1000);
   window.addEventListener('resize', loadTrend);
   window.addEventListener('hashchange', () => showView(location.hash.slice(1)));
@@ -524,6 +659,7 @@ async function init() {
     const box = e.target.closest('[data-fault]');
     if (box) loadFaults('POST', { id: box.dataset.fault, active: box.checked });
   });
+  $('#plan-form').addEventListener('submit', e => { e.preventDefault(); runPlan(); });
   $('#trend-point').addEventListener('change', loadTrend);
   $('#trend-range').addEventListener('change', loadTrend);
 }

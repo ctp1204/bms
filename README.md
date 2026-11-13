@@ -4,7 +4,9 @@ Lớp giám sát hợp nhất **chỉ đọc** cho phòng máy trung tâm dữ l
 
 Toàn bộ thiết bị là **giả lập**. Ứng dụng viết bằng Node.js thuần, **không dùng thư viện ngoài**.
 
-Tùy chọn: nối với **iTop (ITSM)** để cảnh báo tự tạo ticket, gom theo sự cố ([mục 13](#13-itsm-với-itop-tùy-chọn)).
+Tùy chọn:
+- nối với **iTop (ITSM)** để cảnh báo tự tạo ticket, gom theo sự cố ([mục 13](#13-itsm-với-itop-tùy-chọn));
+- nối với **NetBox (DCIM)** để quản lý rack, máy chủ, chuỗi cấp điện và trả lời "còn chỗ, còn điện ở đâu" ([mục 14](#14-dcim-với-netbox-tùy-chọn)).
 
 ---
 
@@ -23,7 +25,8 @@ Tùy chọn: nối với **iTop (ITSM)** để cảnh báo tự tạo ticket, go
 11. [Kiểm thử](#11-kiểm-thử)
 12. [Deploy lên Render](#12-deploy-lên-render)
 13. [ITSM với iTop (tùy chọn)](#13-itsm-với-itop-tùy-chọn)
-14. [Giới hạn hiện tại](#14-giới-hạn-hiện-tại)
+14. [DCIM với NetBox (tùy chọn)](#14-dcim-với-netbox-tùy-chọn)
+15. [Giới hạn hiện tại](#15-giới-hạn-hiện-tại)
 
 ---
 
@@ -120,7 +123,8 @@ bms/
 ├── config/
 │   ├── devices.json      # thiết bị, thanh ghi, tên vi/ja, chỉ số dẫn xuất
 │   ├── alarms.json       # luật cảnh báo (25 luật), nội dung vi/ja
-│   └── itsm.json         # quy tắc tạo ticket: nhóm sự cố, ưu tiên, SLA, ánh xạ CMDB
+│   ├── itsm.json         # quy tắc tạo ticket: nhóm sự cố, ưu tiên, SLA, ánh xạ CMDB
+│   └── dcim.json         # mô hình DCIM: rack, máy chủ mẫu, chuỗi điện A/B, ngân sách, ánh xạ NetBox
 ├── sim/
 │   ├── plant.js          # mô hình vật lý làm mát + điện, danh sách sự cố
 │   └── index.js          # Modbus gateway :5020 + API sự cố :5021
@@ -133,16 +137,21 @@ bms/
 │   ├── auth.js           # Basic Auth cho bản deploy
 │   ├── itop.js           # client REST của iTop (http/https có sẵn của Node)
 │   ├── itsm.js           # bộ nối cảnh báo → ticket, hàng đợi có thử lại
-│   ├── itsm-cmdb.js      # đồng bộ thiết bị vào CMDB của iTop
+│   ├── itsm-cmdb.js      # đồng bộ thiết bị và máy chủ vào CMDB của iTop
+│   ├── netbox.js         # client REST của NetBox (token v2, không có hàm xóa)
+│   ├── dcim-sync.js      # đồng bộ mô hình DCIM vào NetBox (không bao giờ xóa)
+│   ├── dcim-capacity.js  # hồ sơ NetBox/config + số đo → dung lượng, "lắp vào đâu"
+│   ├── dcim-impact.js    # mất PDU thì máy chủ nào mất điện / còn một nguồn
 │   └── index.js          # máy chủ HTTP, API, SSE, proxy /sim
 ├── public/
-│   ├── index.html        # dashboard 3 tab
+│   ├── index.html        # dashboard 4 tab (Tổng quan, Làm mát, Điện, Dung lượng)
 │   ├── app.js            # logic giao diện, sơ đồ phòng máy, sơ đồ một sợi, biểu đồ
 │   ├── i18n.js           # từ điển giao diện vi/ja
 │   └── style.css
 ├── scripts/
 │   ├── start.js          # chạy bộ giả lập và ứng dụng thành 2 tiến trình
-│   └── itsm-cmdb-sync.js # npm run itsm:cmdb
+│   ├── itsm-cmdb-sync.js # npm run itsm:cmdb
+│   └── dcim-sync.js      # npm run dcim:sync
 ├── itsm/                 # iTop chạy bằng Docker (chỉ ở máy local)
 │   ├── docker-compose.yml, Dockerfile
 │   ├── install.sh        # cài iTop tự động, không cần wizard
@@ -150,6 +159,12 @@ bms/
 │   ├── smoke-test.sh     # thử REST API (local hoặc qua đường hầm)
 │   ├── tunnel.sh         # mở iTop qua đường hầm (ngrok hoặc Cloudflare) cho bản Render
 │   └── .env.example      # mẫu mật khẩu; .env thật không commit
+├── dcim/                 # NetBox chạy bằng Docker (chỉ ở máy local)
+│   ├── docker-compose.yml
+│   ├── install.sh        # tự sinh dcim/.env, bật NetBox, tạo tài khoản API bms-dcim
+│   ├── bootstrap.py      # tài khoản API quyền tối thiểu (xem/thêm/sửa, không xóa)
+│   ├── smoke-test.sh     # thử REST API và kiểm tra quyền
+│   └── .env.example
 ├── test/                 # test bằng node:test
 ├── render.yaml           # cấu hình deploy Render (Blueprint)
 └── data/                 # nhật ký cảnh báo, trạng thái ITSM khi chạy (không commit)
@@ -298,6 +313,9 @@ Biến dùng được trong `message`: `{device}`, `{name}`, `{value}`, `{uom}`.
 | `ITSM_WARNING_HOLD_SEC` | `300` (trong `itsm.json`) | Cảnh báo mức warning phải kéo dài bao lâu mới tạo ticket. Demo: `30` |
 | `ITSM_NOC_URL` | `RENDER_EXTERNAL_URL` hoặc `http://127.0.0.1:<PORT>/` | Link NOC ghi trong ticket |
 | `ITSM_CMDB_USER`, `ITSM_CMDB_PASSWORD` | `bms-cmdb` | Tài khoản riêng cho `npm run itsm:cmdb` |
+| `DCIM_API_KEY`, `DCIM_API_TOKEN` | (trống) | Token NetBox của `bms-dcim` (trong `dcim/.env`). Có thì hồ sơ DCIM đọc từ NetBox; không có thì dùng `config/dcim.json` |
+| `NETBOX_URL` / `NETBOX_PORT` | `http://127.0.0.1:8001/` | Địa chỉ NetBox |
+| `DCIM_SOURCE` | (trống) | `config`: bỏ qua NetBox dù có token |
 
 Ví dụ chạy song song với một bản khác:
 
@@ -319,6 +337,9 @@ PORT=8081 SIM_MODBUS_PORT=5030 SIM_CONTROL_PORT=5031 MODBUS_PORT=5030 npm start
 | POST | `/api/alarms/:id/ack` | Xác nhận cảnh báo, body `{"user":"operator"}` |
 | GET | `/api/events?limit=50` | Nhật ký sự kiện cảnh báo gần nhất |
 | GET | `/api/itsm` | Trạng thái kết nối iTop, số lệnh chờ, ticket của từng cảnh báo (`{"enabled":false}` khi tắt) |
+| GET | `/api/dcim/capacity` | Dung lượng từng rack (U, kW đo/định mức/còn lại, nhiệt inlet) và PDU sàn so với ngưỡng 2N; ghi rõ nguồn hồ sơ |
+| GET | `/api/dcim/plan?type=gpu8&count=2` | "Lắp vào đâu": rack phù hợp nhất, lý do từng rack, có giữ 2N không. Hoặc `?u=8&kw=10.2&count=2` |
+| GET | `/api/dcim/impact?pdu=pdua` | Mất PDU sàn: máy chủ mất điện, máy chủ còn một nguồn, tải feed còn lại |
 | GET | `/api/stream` | Server-Sent Events, đẩy snapshot mỗi 2 giây |
 | GET, POST | `/sim/api/faults` | Chỉ khi `SIM_PROXY=1`: chuyển tiếp tới API sự cố của bộ giả lập |
 
@@ -329,12 +350,12 @@ Khi bật `BASIC_AUTH_PASSWORD`, mọi đường dẫn trừ `/healthz` đều c
 ## 11. Kiểm thử
 
 ```bash
-npm test         # 61 test: Modbus, bộ cảnh báo, mô hình làm mát + điện, bộ thu thập, đa ngôn ngữ, Basic Auth, ITSM
+npm test         # 101 test: Modbus, bộ cảnh báo, mô hình làm mát + điện, bộ thu thập, đa ngôn ngữ, Basic Auth, ITSM, DCIM
 npm run check    # kiểm tra cú pháp mọi file JavaScript
 node --test --experimental-test-coverage test/   # đo độ phủ, có sẵn trong Node
 ```
 
-Test ITSM dùng iTop giả (HTTP server nhỏ trong test), nên `npm test` không cần Docker. Bản iTop thật được thử bằng `itsm/smoke-test.sh`.
+Test ITSM và DCIM dùng iTop giả và NetBox giả (HTTP server nhỏ trong test, `test/helpers/fake-netbox.js`), nên `npm test` không cần Docker. Bản thật được thử bằng `itsm/smoke-test.sh` và `dcim/smoke-test.sh`.
 
 Một số test đáng chú ý:
 
@@ -344,6 +365,7 @@ Một số test đáng chú ý:
 - PDU-A mất nguồn: PDU-B gánh toàn bộ tải.
 - Mọi chuỗi trong cấu hình và giao diện có đủ tiếng Việt và tiếng Nhật.
 - ITSM, chạy với bộ cảnh báo thật: mất điện lưới chỉ tạo **một** ticket P1; iTop mất kết nối thì thử lại và gửi đúng một lần; khởi động lại không tạo ticket trùng.
+- DCIM: đồng bộ vào NetBox rồi đọc ngược ra phải khớp hoàn toàn với config; chạy lại không ghi gì; cáp cắm sai chỗ chỉ báo xung đột, không gỡ; một máy chủ thêm trong NetBox hiện ngay ở phần dung lượng; mất PDU-A ghi đúng danh sách máy chủ vào ticket.
 
 ---
 
@@ -397,7 +419,7 @@ docker compose up -d --build    # iTop 3.2.2 + MariaDB, chỉ mở ở 127.0.0.1
 ./bootstrap.sh                  # tổ chức, 3 nhóm xử lý, tài khoản API bms-itsm và bms-cmdb
 ./smoke-test.sh                 # thử REST API (tạo vài ticket [SMOKE], có thể đóng tay)
 cd ..
-npm run itsm:cmdb               # đưa 16 thiết bị vào CMDB; chạy lại được bất cứ lúc nào
+npm run itsm:cmdb               # đưa 16 thiết bị (và máy chủ trong rack, xem mục 14) vào CMDB; chạy lại được bất cứ lúc nào
 ```
 
 Đăng nhập iTop ở http://127.0.0.1:8000 bằng `admin` với mật khẩu `ITOP_ADMIN_PASSWORD` trong `itsm/.env`. Hai tài khoản API chỉ có quyền tối thiểu: `bms-itsm` tạo và cập nhật ticket, `bms-cmdb` chỉ quản lý CI.
@@ -466,7 +488,70 @@ Kết thúc: tắt mọi sự cố, đóng các ticket trong iTop.
 
 ---
 
-## 14. Giới hạn hiện tại
+## 14. DCIM với NetBox (tùy chọn)
+
+DCIM là **hồ sơ hạ tầng vật lý**: rack, máy chủ ở U nào, cắm điện từ đâu, còn bao nhiêu chỗ và bao nhiêu điện. BMS và EPMS cho biết số đo; DCIM cho biết số đo đó thuộc về cái gì và còn dư bao nhiêu. Demo dùng [NetBox](https://netboxlabs.com/oss/netbox/) (mã nguồn mở) làm **nguồn gốc** của hồ sơ; repo chỉ viết phần nối, giống cách làm với iTop. Không có NetBox thì demo dùng `config/dcim.json` (cùng dữ liệu), nên tab **Dung lượng** vẫn chạy trên Render.
+
+### Mô hình
+
+Toàn bộ nằm trong `config/dcim.json`; test giữ cho mô hình khớp với bộ giả lập và luật cảnh báo.
+
+- **6 rack 42U**, ngân sách điện **35 kW/rack**. Mức: dưới 70% bình thường, 70–90% gần đầy, trên 90% vượt ngưỡng.
+- **26 máy chủ mẫu** (máy 8 GPU 10,2 kW, 4 GPU 3,2 kW, tính toán, lưu trữ, switch), xếp để **R4 gần hết điện** và **R6 gần trống**. Bộ giả lập chia 120 kW tải IT theo công suất định mức của các máy này, nên số đo trên PDU khớp hồ sơ.
+- **Chuỗi điện:** tủ PDU-A / PDU-B (140 kW, ngưỡng 2N 70 kW) → mỗi rack 2 power feed 3 pha 400 V 63 A (NetBox tính 34,9 kW, khớp ngân sách) → mỗi rack 2 thanh nguồn 0U → **PSU1 cắm phía A, PSU2 cắm phía B**. Đoạn MSB → UPS → tủ PDU chỉ ghi trong mô tả tủ (NetBox không nối dây vào tủ phân phối được).
+- **Chưa làm cáp mạng**; chỉ làm chuỗi điện vì gắn trực tiếp với EPMS.
+- **CMDB:** NetBox là nguồn gốc của máy chủ và vị trí. `npm run itsm:cmdb` đưa máy chủ vào iTop thành CI lớp `Server`, gắn đúng rack. 16 thiết bị hạ tầng được giám sát vẫn lấy danh sách từ `devices.json` (cảnh báo gắn với mã Modbus của chúng); trong NetBox chúng có cùng mã `bms:<id>`.
+
+### Cài đặt (một lần)
+
+Cần Docker. Lần đầu NetBox chạy migration database, có thể mất 5–15 phút.
+
+```bash
+./dcim/install.sh        # tự sinh dcim/.env (mật khẩu ngẫu nhiên), bật NetBox ở 127.0.0.1:8001, tạo tài khoản API bms-dcim
+./dcim/smoke-test.sh     # thử API: đọc được, thêm được, KHÔNG xóa được, không xem được người dùng
+npm run dcim:sync        # tạo site, phòng máy, rack, loại thiết bị, tủ PDU, feed, thiết bị, máy chủ và cáp nguồn trong NetBox
+npm run itsm:cmdb        # (nếu dùng iTop) đưa máy chủ từ NetBox vào CMDB của iTop
+```
+
+Đăng nhập NetBox ở http://127.0.0.1:8001 bằng `admin` với `NETBOX_ADMIN_PASSWORD` trong `dcim/.env`. `npm run dcim:sync` chạy lại được bất cứ lúc nào: chỉ tạo phần thiếu và sửa trường bị lệch, **không bao giờ xóa**; đối tượng trùng hoặc cáp cắm sai chỗ được báo là xung đột để người kiểm tra.
+
+### Chạy
+
+```bash
+npm run start:dcim       # như npm start, đọc dcim/.env: hồ sơ lấy từ NetBox (làm mới mỗi phút)
+npm run start:all        # đọc cả itsm/.env và dcim/.env: ITSM + DCIM
+```
+
+Tab **Dung lượng** trên dashboard:
+
+- **Sơ đồ rack theo U**: máy chủ đúng vị trí, tô màu theo loại; trên đầu mỗi rack là nhiệt độ inlet, thanh điện "đo được / 35 kW", số U trống. Bấm tên rack để mở trong NetBox.
+- **Lắp thiết bị vào đâu?**: chọn loại máy và số lượng. Hệ thống xét U trống liền nhau, công suất còn lại theo **số đo thật**, nhiệt độ inlet, và ngưỡng 2N của PDU sàn; vẽ ô "Lắp ở đây" lên sơ đồ.
+- **PDU sàn và dự phòng 2N**, **bảng dung lượng theo rack**.
+
+Khi có cảnh báo **PDU mất nguồn đầu vào** và đang bật ITSM, ticket iTop có thêm phần **Ảnh hưởng** (song ngữ): máy chủ mất điện hẳn, máy chủ chỉ còn một nguồn (gom theo rack), và tải của feed còn lại từng rack so với 34,9 kW; các máy chủ đó được gắn làm CI của ticket.
+
+Xóa sạch NetBox để làm lại: `cd dcim && docker compose down -v`, rồi xóa `dcim/.env` nếu muốn sinh mật khẩu mới.
+
+### Kịch bản demo 6: còn chỗ ở đâu, mất PDU thì ảnh hưởng ai
+
+Khoảng 6 phút. Chuẩn bị: iTop và NetBox đang chạy, `npm run start:all`, mở dashboard ở tab **Dung lượng**, NetBox và iTop ở hai tab khác.
+
+| # | Thao tác | Người xem thấy | Lời giải thích |
+|---|---|---|---|
+| 1 | Chỉ vào sơ đồ rack | R1 và R4 có thanh điện màu vàng; R4 còn khoảng 5 kW, R6 còn khoảng 31 kW và 37U. Góc trên ghi "Hồ sơ: NetBox" | "Đây là hồ sơ trong NetBox ghép với số đo thật của EPMS và BMS." |
+| 2 | Chọn **Máy chủ 8 GPU**, số lượng 1, bấm **Tìm chỗ** | "Nên lắp vào R6"; ô **Lắp ở đây** hiện trong R6; R1 và R4 bị loại vì thiếu điện; PDU sàn sau khi lắp vẫn giữ 2N | "Trả lời bằng số đo thật, không phải đoán theo công suất ghi trên nhãn." |
+| 3 | Đổi số lượng thành 2 | R6 vẫn đủ chỗ và điện, nhưng khung vàng: PDU sàn vượt 70 kW, **mất 2N** | "Rack còn chỗ chưa chắc lắp được. DCIM nhìn cả chuỗi điện phía trên." |
+| 4 | Bật **PDU-A mất nguồn** trong bảng giả lập | Tab Dung lượng: PDU-A đỏ "mất nguồn đầu vào". iTop: ticket **P2** cho *DC Power*, phần **Ảnh hưởng** liệt kê 26 máy chủ chỉ còn một nguồn, feed R4-B gánh 31,2 kW (89%); tab CIs có 26 máy chủ | "Người trực biết ngay máy nào đang chạy không dự phòng và feed nào sắp đầy, không cần tra bản vẽ." |
+| 5 | (Tùy chọn) Trong NetBox, xóa cáp PSU2 của **R6-CMP-1**, chờ 1 phút, tắt rồi bật lại **PDU-A mất nguồn** | Ghi chú mới trên ticket: "MẤT ĐIỆN HẲN: 1 máy chủ: R6: R6-CMP-1" | "Máy chỉ cắm một nguồn sẽ chết khi mất PDU đó. Hồ sơ đúng thì cảnh báo đúng." Sau đó chạy `npm run dcim:sync` để nối lại cáp. |
+| 6 | (Tùy chọn) Trong NetBox, thêm một máy chủ 8 GPU vào R6, chờ 1 phút | Sơ đồ R6 có máy mới; R6 còn ít U và ít kW hơn | "NetBox là nguồn gốc: sửa ở đó, mọi nơi khác theo." |
+
+Kết thúc: tắt sự cố, đóng ticket trong iTop.
+
+**Thông điệp chốt:** BMS và EPMS cho biết số đo; DCIM cho biết số đo đó thuộc về đâu và còn dư bao nhiêu. Hồ sơ là phần dùng sẵn (NetBox); giá trị tự xây là ghép hồ sơ với số đo thật và đưa kết quả vào đúng ticket.
+
+---
+
+## 15. Giới hạn hiện tại
 
 | Chưa có | Ghi chú |
 |---|---|
@@ -478,10 +563,14 @@ Kết thúc: tắt mọi sự cố, đóng các ticket trong iTop.
 | SLA thật trong iTop | Hạn SLA mới ghi trong nội dung ticket; chưa cấu hình hợp đồng, dịch vụ, SLA/SLT trong iTop |
 | Lớp CI cho thiết bị làm mát | iTop không có sẵn; CRAH, chiller, dây rò rỉ tạm dùng `Peripheral`. Làm đúng cần viết extension iTop |
 | ITSM trên Render | Gói miễn phí không chạy được iTop + MariaDB. Bản Render dùng iTop ở máy riêng qua đường hầm; máy đó phải bật khi demo |
+| NetBox trên Render | Bản Render dùng hồ sơ trong `config/dcim.json`. Muốn đọc NetBox thật từ Render cần mở NetBox qua đường hầm như iTop |
+| Cáp mạng, cổng switch trong DCIM | Mới làm chuỗi điện |
+| Đoạn MSB → UPS → tủ PDU trong NetBox | Chỉ ghi trong mô tả; NetBox không nối dây vào tủ phân phối |
+| 16 thiết bị hạ tầng lấy từ NetBox | Vẫn lấy từ `devices.json` vì cảnh báo gắn với mã Modbus; máy chủ và vị trí đã lấy từ NetBox |
 | Phân tích chất lượng điện, SOE, đo đếm tính tiền | Nên mua: cần đồng hồ đo chuyên dụng |
 | Báo cáo kWh theo khách hàng | Dữ liệu kWh đã có; chưa có báo cáo |
 | Máy chủ dự phòng, tách mạng OT/IT | Cần khi triển khai thật |
 
 ---
 
-Tài liệu giải thích chi tiết kèm sơ đồ tương tác, kịch bản demo 1–4 và bảng thuật ngữ (song ngữ Việt/Nhật): **Bên trong BMS · EPMS Demo** — https://claude.ai/artifact/RsdNUtqKDUrx5ZSVHs6QF6 (chia sẻ trong tổ chức).
+Tài liệu giải thích chi tiết kèm sơ đồ tương tác, kịch bản demo 1–6 (Phần A · BMS, B · EPMS, C · ITSM, D · DCIM) và bảng thuật ngữ (song ngữ Việt/Nhật): **Bên trong BMS · EPMS Demo** — https://claude.ai/artifact/RsdNUtqKDUrx5ZSVHs6QF6 (chia sẻ trong tổ chức).
