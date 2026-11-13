@@ -63,7 +63,7 @@ alarms.on('event', e => {
 // DCIM_SOURCE=config: bỏ qua NetBox dù có token.
 const dcimCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/dcim.json'), 'utf8'));
 const useNetbox = process.env.DCIM_SOURCE !== 'config' && process.env.DCIM_API_KEY && process.env.DCIM_API_TOKEN;
-const netboxUrl = process.env.NETBOX_URL || (process.env.NETBOX_PORT ? `http://127.0.0.1:${process.env.NETBOX_PORT}/` : dcimCfg.netbox.url);
+const netboxUrl = process.env.NETBOX_URL || (process.env.NETBOX_PORT ? `http://127.0.0.1:${process.env.NETBOX_PORT}/netbox/` : dcimCfg.netbox.url);
 const dcimInventory = new DcimInventory({
   client: useNetbox ? new NetboxClient({ url: netboxUrl, token: `nbt_${process.env.DCIM_API_KEY}.${process.env.DCIM_API_TOKEN}`, timeoutMs: 8000 }) : null,
   dcim: dcimCfg,

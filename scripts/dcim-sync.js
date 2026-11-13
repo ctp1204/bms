@@ -25,7 +25,7 @@ async function main() {
   if (!env.DCIM_API_KEY || !env.DCIM_API_TOKEN) throw new Error('Thiếu DCIM_API_KEY / DCIM_API_TOKEN. Chạy ./dcim/install.sh trước.');
   const dcim = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/dcim.json'), 'utf8'));
   const { devices } = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/devices.json'), 'utf8'));
-  const url = env.NETBOX_URL || (env.NETBOX_PORT ? `http://127.0.0.1:${env.NETBOX_PORT}/` : dcim.netbox.url);
+  const url = env.NETBOX_URL || (env.NETBOX_PORT ? `http://127.0.0.1:${env.NETBOX_PORT}/netbox/` : dcim.netbox.url);
   const client = new NetboxClient({ url, token: `nbt_${env.DCIM_API_KEY}.${env.DCIM_API_TOKEN}` });
 
   console.log(`[dcim] Đồng bộ DCIM (khung, thiết bị, cáp nguồn) vào ${url}`);

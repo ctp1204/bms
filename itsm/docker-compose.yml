@@ -22,24 +22,39 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Đường hầm HTTPS để bản demo trên Render gọi được iTop chạy ở máy này. Chỉ chạy khi gọi ./tunnel.sh.
+  # Cổng vào chung cho đường hầm: / → iTop, /netbox/ → NetBox (dcim/, nếu đang chạy). Chỉ chạy khi gọi ./tunnel.sh.
+  gateway:
+    image: nginx:1.27-alpine
+    environment:
+      NETBOX_PORT: ${NETBOX_PORT:-8001}
+    volumes:
+      - ./gateway/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    extra_hosts:
+      # NetBox là một cụm Docker riêng, mở ở cổng 8001 của máy: gọi qua máy chủ
+      - host.docker.internal:host-gateway
+    depends_on:
+      - itop
+    profiles: ["ngrok", "tunnel"]
+    restart: "no"
+
+  # Đường hầm HTTPS để bản demo trên Render gọi được iTop (và NetBox) chạy ở máy này. Chỉ chạy khi gọi ./tunnel.sh.
   # ngrok (mặc định khi có NGROK_AUTHTOKEN): tài khoản miễn phí được một tên miền dev cố định.
   ngrok:
     image: ngrok/ngrok:3.39.13-alpine
-    command: ["http", "itop:80", "--log", "stdout", "--log-format", "logfmt"]
+    command: ["http", "gateway:80", "--log", "stdout", "--log-format", "logfmt"]
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
     depends_on:
-      - itop
+      - gateway
     profiles: ["ngrok"]
     restart: "no"
 
   # Cloudflare Quick Tunnel (dự phòng khi không có NGROK_AUTHTOKEN): không cần tài khoản, địa chỉ đổi mỗi lần chạy.
   tunnel:
     image: cloudflare/cloudflared:2026.9.3
-    command: ["tunnel", "--no-autoupdate", "--url", "http://itop:80"]
+    command: ["tunnel", "--no-autoupdate", "--url", "http://gateway:80"]
     depends_on:
-      - itop
+      - gateway
     profiles: ["tunnel"]
     # Không tự khởi động lại: xin địa chỉ thất bại mà lặp lại liên tục sẽ bị Cloudflare chặn (HTTP 429).
     # Khi đã có địa chỉ, cloudflared tự kết nối lại nếu mạng chập chờn.

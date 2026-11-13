@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Mở iTop ra internet qua đường hầm HTTPS để bản demo trên Render tạo được ticket.
-# iTop vẫn chạy ở máy này; tắt máy hoặc tắt đường hầm là hết ticket.
+# Mở iTop (và NetBox, nếu đã cài ở dcim/) ra internet qua một đường hầm HTTPS, để bản demo trên Render
+# tạo được ticket và đọc được hồ sơ DCIM. Cả hai vẫn chạy ở máy này; tắt máy hoặc tắt đường hầm là mất kết nối.
+# Một địa chỉ cho cả hai (gói ngrok miễn phí chỉ có một tên miền): / → iTop, /netbox/ → NetBox (xem gateway/).
 #   ./tunnel.sh        bật iTop + đường hầm, in địa chỉ cần dán vào Render
 #   ./tunnel.sh url    in lại địa chỉ hiện tại
 #   ./tunnel.sh down   tắt đường hầm (iTop vẫn chạy ở 127.0.0.1)
@@ -37,7 +38,7 @@ tunnel_running() {
 
 case "${1:-up}" in
   down)
-    dc stop "$SVC"
+    dc stop "$SVC" gateway
     echo "Đã tắt đường hầm ($PROVIDER). Bản trên Render sẽ báo 'iTop: lỗi, đang thử lại' cho tới khi bật lại."
     exit 0 ;;
   url)
@@ -90,6 +91,33 @@ for _ in $(seq 1 30); do
 done
 [ "$code" = "200" ] && echo " OK" || { echo; echo "Đường hầm chưa trả lời (HTTP $code). Thử lại sau ít phút: ./tunnel.sh url" >&2; exit 1; }
 
+# NetBox (tùy chọn): cần biết địa chỉ công khai để cho đăng nhập giao diện qua HTTPS (CSRF_TRUSTED_ORIGINS).
+# Ghi vào dcim/.env; địa chỉ đổi thì dựng lại container NetBox (khoảng 1 phút). API không cần bước này.
+netbox=''
+DCIM_ENV=../dcim/.env
+if [ -f "$DCIM_ENV" ]; then
+  cur=$(grep -E '^NETBOX_PUBLIC_ORIGIN=' "$DCIM_ENV" | cut -d= -f2- || true)
+  if [ "$cur" != "$url" ]; then
+    if grep -qE '^NETBOX_PUBLIC_ORIGIN=' "$DCIM_ENV"; then
+      sed -i "s#^NETBOX_PUBLIC_ORIGIN=.*#NETBOX_PUBLIC_ORIGIN=$url#" "$DCIM_ENV"
+    else
+      printf '# Địa chỉ đường hầm, do itsm/tunnel.sh ghi\nNETBOX_PUBLIC_ORIGIN=%s\n' "$url" >> "$DCIM_ENV"
+    fi
+    echo "NetBox: cập nhật địa chỉ công khai, dựng lại container NetBox..."
+  fi
+  (cd ../dcim && docker compose up -d netbox netbox-worker >/dev/null 2>&1) || true
+  printf 'Đang kiểm tra NetBox qua đường hầm'
+  auth="Authorization: Bearer nbt_$(grep -E '^DCIM_API_KEY=' "$DCIM_ENV" | cut -d= -f2-).$(grep -E '^DCIM_API_TOKEN=' "$DCIM_ENV" | cut -d= -f2-)"
+  ncode=''
+  for _ in $(seq 1 40); do
+    ncode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'ngrok-skip-browser-warning: 1' -H "$auth" "$url/netbox/api/status/" || true)
+    [ "$ncode" = "200" ] && break
+    printf '.'; sleep 3
+  done
+  if [ "$ncode" = "200" ]; then echo " OK"; netbox=1
+  else echo; echo "NetBox chưa trả lời qua đường hầm (HTTP $ncode). NetBox có đang chạy không? ./dcim/install.sh rồi chạy lại ./tunnel.sh" >&2; fi
+fi
+
 if [ "$PROVIDER" = ngrok ]; then
   note="Địa chỉ ngrok cố định: lần sau bật lại không cần sửa Render.
 Lần đầu mở iTop bằng trình duyệt sẽ có trang cảnh báo của ngrok: bấm Visit Site (nhớ 7 ngày)."
@@ -105,5 +133,15 @@ Trên Render: Dashboard → bms-demo → Environment, đặt các biến sau r�
   ITSM_ENABLED          1
   ITSM_URL              $url/
   ITSM_PASSWORD         (giá trị ITSM_PASSWORD trong itsm/.env)
-$note
 EOF
+if [ -n "$netbox" ]; then
+  cat <<EOF
+  NETBOX_URL            $url/netbox/
+  DCIM_API_KEY          (giá trị DCIM_API_KEY trong dcim/.env)
+  DCIM_API_TOKEN        (giá trị DCIM_API_TOKEN trong dcim/.env)
+
+NetBox đã mở ở: $url/netbox/
+Đăng nhập: admin / NETBOX_ADMIN_PASSWORD trong dcim/.env
+EOF
+fi
+echo "$note"

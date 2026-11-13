@@ -34,7 +34,7 @@ async function main() {
   const dcim = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/dcim.json'), 'utf8'));
   let inventory;
   if (env.DCIM_SOURCE !== 'config' && env.DCIM_API_KEY && env.DCIM_API_TOKEN) {
-    const nbUrl = env.NETBOX_URL || (env.NETBOX_PORT ? `http://127.0.0.1:${env.NETBOX_PORT}/` : dcim.netbox.url);
+    const nbUrl = env.NETBOX_URL || (env.NETBOX_PORT ? `http://127.0.0.1:${env.NETBOX_PORT}/netbox/` : dcim.netbox.url);
     inventory = await inventoryFromNetbox(new NetboxClient({ url: nbUrl, token: `nbt_${env.DCIM_API_KEY}.${env.DCIM_API_TOKEN}` }), dcim, devices);
     console.log(`[cmdb] Máy chủ lấy từ NetBox ${nbUrl}`);
   } else {

@@ -48,7 +48,7 @@ docker compose exec -T -e DCIM_USER -e DCIM_API_KEY -e DCIM_API_TOKEN -e PYTHONW
   -c "exec(open('/tmp/bms-bootstrap.py', encoding='utf-8').read())"
 
 cat <<EOF
-Xong. NetBox: http://127.0.0.1:${NETBOX_PORT:-8001}/
+Xong. NetBox: http://127.0.0.1:${NETBOX_PORT:-8001}/netbox/
 Đăng nhập: admin / NETBOX_ADMIN_PASSWORD trong dcim/.env
 Kiểm tra API: ./dcim/smoke-test.sh
 EOF
