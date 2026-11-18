@@ -159,6 +159,7 @@ bms/
 │   ├── smoke-test.sh     # thử REST API (local hoặc qua đường hầm)
 │   ├── tunnel.sh         # mở iTop (và NetBox ở /netbox/) qua đường hầm (ngrok hoặc Cloudflare) cho bản Render
 │   ├── gateway/          # nginx sau đường hầm: / → iTop, /netbox/ → NetBox
+│   ├── clear-apache-pid.sh # xóa file pid cũ khi container khởi động lại, để Apache không kẹt
 │   └── .env.example      # mẫu mật khẩu; .env thật không commit
 ├── dcim/                 # NetBox chạy bằng Docker (chỉ ở máy local)
 │   ├── docker-compose.yml
@@ -168,6 +169,7 @@ bms/
 │   ├── smoke-test.sh     # thử REST API và kiểm tra quyền
 │   └── .env.example
 ├── test/                 # test bằng node:test
+├── stack.sh              # bật iTop + NetBox cùng lúc, chờ sẵn sàng, mở đường hầm (status, down, --local)
 ├── render.yaml           # cấu hình deploy Render (Blueprint)
 └── data/                 # nhật ký cảnh báo, trạng thái ITSM khi chạy (không commit)
 ```
@@ -464,7 +466,7 @@ Cài lần đầu:
 4. (Nếu dùng NetBox) đặt thêm `NETBOX_URL=<địa chỉ vừa in>/netbox/`, `DCIM_API_KEY` và `DCIM_API_TOKEN` (giá trị trong `dcim/.env`). Không đặt thì tab Dung lượng trên Render dùng `config/dcim.json`.
 5. Mở bản Render: header hiện `iTop: sẵn sàng`; tab Dung lượng ghi "Hồ sơ: NetBox". Bật một sự cố để thấy ticket.
 
-Những lần sau chỉ cần `./itsm/tunnel.sh` (với ngrok không phải sửa gì trên Render). Các lệnh khác: `./itsm/tunnel.sh url` (in lại địa chỉ), `./itsm/tunnel.sh down` (tắt đường hầm). Thử API qua đường hầm: `ITSM_URL=<địa chỉ> ./itsm/smoke-test.sh`.
+Những lần sau chỉ cần `./stack.sh`: bật iTop và NetBox cùng lúc, chờ cả hai trả lời, rồi chạy `./itsm/tunnel.sh` (với ngrok không phải sửa gì trên Render). `./stack.sh status` xem trạng thái, `./stack.sh down` dừng tất cả, `./stack.sh --local` không mở đường hầm. Các lệnh khác: `./itsm/tunnel.sh url` (in lại địa chỉ), `./itsm/tunnel.sh down` (tắt đường hầm). Thử API qua đường hầm: `ITSM_URL=<địa chỉ> ./itsm/smoke-test.sh`.
 
 Lưu ý:
 
