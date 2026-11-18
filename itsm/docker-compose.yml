@@ -39,11 +39,13 @@ services:
 
   # Đường hầm HTTPS để bản demo trên Render gọi được iTop (và NetBox) chạy ở máy này. Chỉ chạy khi gọi ./tunnel.sh.
   # ngrok (mặc định khi có NGROK_AUTHTOKEN): tài khoản miễn phí được một tên miền dev cố định.
+  # NGROK_DOMAIN (tên miền dev ở https://dashboard.ngrok.com/domains) ghim địa chỉ qua --url; để trống thì ngrok tự chọn.
   ngrok:
     image: ngrok/ngrok:3.39.13-alpine
-    command: ["http", "gateway:80", "--log", "stdout", "--log-format", "logfmt"]
+    entrypoint: ["/bin/sh", "-c", 'exec ngrok http gateway:80 --log stdout --log-format logfmt $${NGROK_DOMAIN:+--url "https://$${NGROK_DOMAIN}"}']
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
     depends_on:
       - gateway
     profiles: ["ngrok"]

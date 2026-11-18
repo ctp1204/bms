@@ -6,3 +6,5 @@ RUN apt-get update \
 # Chạy sau đường hầm HTTPS: xem apache-proxy.conf
 COPY apache-proxy.conf /etc/apache2/conf-available/itop-proxy.conf
 RUN a2enmod headers && a2enconf itop-proxy
+# Xóa file pid cũ mỗi lần container khởi động lại, nếu không Apache không lên (xem clear-apache-pid.sh)
+COPY --chmod=755 clear-apache-pid.sh /etc/my_init.d/05_clear-apache-pid.sh
